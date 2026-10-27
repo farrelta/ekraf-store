@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  TREASURER
+}
+enum PaymentStatus {
+  PENDING
+  PAID
+  REJECTED
+  REFUNDED
+  EXPIRED
+}
+enum FulfillmentStatus {
+  PENDING
+  PROCESSING
+  READY_FOR_PICKUP
+  SHIPPED
+  COMPLETED
+  CANCELLED
+}
+enum InventoryMovementType {
+  ORDER_RESERVATION
+  CANCELLATION_RESTOCK
+  ADJUSTMENT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(CUSTOMER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  orders       Order[]
+  decisions    PaymentEvent[] @relation("PaymentDecisionMaker")
+  auditLogs    AuditLog[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  products  Product[]
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  imageUrl    String?
+  price       Decimal  @db.Decimal(12, 2)
+  stock       Int      @default(0)
+  active      Boolean  @default(true)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orderItems  OrderItem[]
+  movements   InventoryMovement[]
+  @@index([active, name])
+  @@index([categoryId])
+}
+
+model Order {
+  id                String   @id @default(cuid())
+  publicId          String   @unique @default(uuid())
+  idempotencyKey    String?  @unique
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  total             Decimal  @db.Decimal(12, 2)
+  currency          String   @default("IDR")
+  paymentStatus     PaymentStatus @default(PENDING)
+  fulfillmentStatus FulfillmentStatus @default(PENDING)
+  fulfillmentMethod String   @default("PICKUP")
+  fulfillmentNotes  String   @default("")
+  expiresAt         DateTime
+  customerName      String
+  customerPhone     String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  items             OrderItem[]
+  paymentEvents     PaymentEvent[]
+  movements         InventoryMovement[]
+  @@index([userId, createdAt])
+  @@index([paymentStatus, fulfillmentStatus, createdAt])
+  @@index([paymentStatus, expiresAt, fulfillmentStatus])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName    String
+  unitPrice      Decimal @db.Decimal(12, 2)
+  quantity       Int
+  lineTotal      Decimal @db.Decimal(12, 2)
+}
+
+model PaymentEvent {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  actorId        String?
+  actor          User?    @relation("PaymentDecisionMaker", fields: [actorId], references: [id], onDelete: SetNull)
+  action         String
+  reason         String   @default("")
+  reference      String   @default("")
+  amount         Decimal  @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+  @@index([orderId, createdAt])
+}
+
+model InventoryMovement {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  actorId   String?
+  type      InventoryMovementType
+  quantity  Int
+  reason    String
+  createdAt DateTime @default(now())
+  @@index([productId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  @@index([entity, entityId, createdAt])
+}

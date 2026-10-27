@@ -1,0 +1,16 @@
+{
+  "name": "mipa-store",
+  "private": true,
+  "workspaces": ["api", "web"],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace api run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm run build --workspace api && npm run build --workspace web",
+    "test": "npm test --workspace api",
+    "db:migrate": "npm --workspace api run db:migrate",
+    "db:generate": "npm --workspace api run db:generate"
+  },
+  "devDependencies": { "concurrently": "^9.2.1" },
+  "engines": { "node": ">=24.11" }
+}
