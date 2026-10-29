@@ -23,7 +23,7 @@ Use your real email and a unique password. The script refuses to create another 
 
 ## Populate the store
 
-Open the private admin URL described below and sign in there. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Blank size/color fields become STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
+Open the private admin URL described below and sign in there. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Choose No size when a product has no size option; blank color becomes STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
 
 Stock adjustments for continuous products require a reason. Batch stock is received through the batch receipt form. Products are archived and variants/payment methods are disabled rather than deleted.
 
@@ -60,3 +60,13 @@ ADMIN_PANEL_PATH is a server-only URL segment in the root .env file. Open http:/
 There is no admin link in the public store. The private URL still requires ADMIN credentials; customers cannot use the admin login or APIs. Create the first admin with the existing bootstrap command.
 
 Mixed checkout accepts several batches in one order. FULL pays all items initially; BATCH_DEPOSIT pays all merchandise plus half the batch subtotal. Initial payment is due within 24 hours; a verified deposit preserves the order until its balance is paid before batch collection. Merchandise and batch items have independent pickup controls.
+
+## Categories, sizes, colors, and SKUs
+
+The product category dropdown offers T-shirt, Faculty Jacket, Work Shirt, Hoodie, Tote Bag, Accessories, and Other. Choosing Other requires a custom category name. Existing custom categories remain selected as Other when editing.
+
+Each variant form creates one combination. For example, create M / Black with its price and stock, then use Add another variant for L / Black. Do not enter a list such as S, M, L in a single box. Choose No size for items without size options. Batch products must choose XS, S, M, L, XL, XXL, or XXXL and start with zero ready stock.
+
+Color is a plain text field. Type one color name, such as Black or Forest Green; leaving it blank means no color option. The server trims, collapses repeated spaces, and uppercases size/color values before saving.
+
+SKU is generated automatically when saving, for example EKR-7F28D6AB940C, and is displayed with the saved variant. Product, category, price, and stock changes never regenerate it. Existing SKUs remain unchanged. Existing API clients may still supply an explicit SKU; omitting it enables generation. GET /api/admin/catalog-options returns the shared form choices and requires ADMIN authentication.

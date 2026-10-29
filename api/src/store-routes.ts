@@ -6,20 +6,22 @@ import path from "node:path";
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
 import { allocateBatch, expireOrders, fail, move, orderDto, orderInclude, quantities, releaseOrder, total, transaction, paymentSummary } from "./store-service.js";
 import { canTransitionFulfillment } from "./order-policy.js";
+import { catalogOptions, createWithSkus, optionSchema } from "./catalog.js";
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler => (req, res, next) => { void fn(req, res).catch(next); };
 const param = (req: Request, name: string) => String(req.params[name] ?? "");
 const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
 const image = z.string().url().max(2048).refine(v => v.startsWith("https://"), "Use an HTTPS image URL").nullable().optional();
-const variantSchema = z.object({ sku: text, size: text.default("STANDARD"), color: text.default("STANDARD"), price: money, onHand: z.number().int().min(0).max(100000).default(0) });
+const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
 const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT") });
 const productInclude = { variants: { orderBy: { sku: "asc" as const } }, batches: { orderBy: { closesAt: "desc" as const } } };
 const receiptDirectory = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
-const normalizeVariant = (v: z.output<typeof variantSchema>) => ({ ...v, size: v.size.toUpperCase(), color: v.color.toUpperCase(), price: new Prisma.Decimal(v.price) });
+const normalizeVariant = (v: z.output<typeof variantSchema> & { sku: string }) => ({ ...v, price: new Prisma.Decimal(v.price) });
 
 export function registerStoreRoutes(app: Express, db: PrismaClient, auth: RequestHandler, admin: RequestHandler) {
   app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  app.get("/api/admin/catalog-options", admin, (_req, res) => res.json(catalogOptions));
   app.get("/api/products", route(async (req, res) => {
     const { search } = z.object({ search: z.string().trim().max(100).optional() }).parse(req.query);
     const products = await db.product.findMany({ where: { status: "PUBLISHED", ...(search ? { name: { contains: search, mode: "insensitive" } } : {}) }, include: { variants: { where: { active: true }, orderBy: { sku: "asc" } }, batches: { where: { status: "OPEN", opensAt: { lte: new Date() }, closesAt: { gt: new Date() } }, orderBy: { closesAt: "asc" } } }, orderBy: { name: "asc" } });
@@ -28,15 +30,15 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   app.get("/api/admin/products", admin, route(async (_req, res) => res.json({ products: await db.product.findMany({ include: productInclude, orderBy: { createdAt: "desc" } }) })));
   app.post("/api/admin/products", admin, route(async (req, res) => {
     const { variants, ...data } = productFields.extend({ variants: z.array(variantSchema).min(1).max(100) }).parse(req.body);
-    if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || v.size.toUpperCase() === "STANDARD")) fail("Batch products need preset sizes and start with zero ready stock", 400);
-    const product = await transaction(db, async tx => {
+    if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || v.size === "STANDARD" || !catalogOptions.sizes.includes(v.size))) fail("Batch products need a preset clothing size and start with zero ready stock", 400);
+    const product = await createWithSkus(db, variants, assigned => transaction(db, async tx => {
       const created = await tx.product.create({ data });
-      for (const v of variants) {
+      for (const v of assigned) {
         const variant = await tx.productVariant.create({ data: { ...normalizeVariant(v), productId: created.id, onHand: 0 } });
         if (v.onHand > 0) await move(tx, { variantId: variant.id, actorId: req.session.userId!, type: "ADJUSTMENT", onHandDelta: v.onHand, reservedDelta: 0, reason: "Initial stock" });
       }
       return tx.product.findUniqueOrThrow({ where: { id: created.id }, include: productInclude });
-    });
+    }));
     res.status(201).json({ product });
   }));
   app.patch("/api/admin/products/:id", admin, route(async (req, res) => {
@@ -46,13 +48,14 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   }));
   app.post("/api/admin/products/:id/variants", admin, route(async (req, res) => {
     const data = variantSchema.parse(req.body);
-    const variant = await transaction(db, async tx => {
+    const variant = await createWithSkus(db, [data], ([assigned]) => transaction(db, async tx => {
+      if (!assigned) throw new Error("Variant assignment missing");
       const product = await tx.product.findUniqueOrThrow({ where: { id: param(req, "id") } });
-      if (product.sellingType === "BATCH" && (data.onHand || data.size.toUpperCase() === "STANDARD")) fail("Batch variants need a preset size and zero initial stock", 400);
-      const created = await tx.productVariant.create({ data: { ...normalizeVariant(data), productId: product.id, onHand: 0 } });
+      if (product.sellingType === "BATCH" && (data.onHand || data.size === "STANDARD" || !catalogOptions.sizes.includes(data.size))) fail("Batch variants need a preset clothing size and zero initial stock", 400);
+      const created = await tx.productVariant.create({ data: { ...normalizeVariant(assigned), productId: product.id, onHand: 0 } });
       if (data.onHand) await move(tx, { variantId: created.id, actorId: req.session.userId!, type: "ADJUSTMENT", onHandDelta: data.onHand, reservedDelta: 0, reason: "Initial stock" });
       return created;
-    });
+    }));
     res.status(201).json({ variant });
   }));
   app.patch("/api/admin/variants/:id", admin, route(async (req, res) => {

@@ -52,6 +52,23 @@ test('minimal EKRAF store integration', { skip: !target, timeout: 90000 }, async
     method=(await post(admin,'/admin/payment-methods',{name:'Organization test bank',type:'BANK_TRANSFER',bankName:'Test Bank',accountName:'EKRAF',accountNumber:'12345'})).method;
     assert.equal((await admin.call('/admin/payment-methods','POST',{name:'Invalid QR',type:'QRIS'})).status,400);
   });
+  await t.test('catalog options are admin-only and generated SKUs preserve options and history',async()=>{
+    assert.equal((await new Client().call('/admin/catalog-options')).status,401);
+    assert.equal((await alice.call('/admin/catalog-options')).status,403);
+    const options=await admin.call('/admin/catalog-options');assert.equal(options.status,200);assert(options.body.categories.includes('Other'));assert(options.body.sizes.includes('XXXL'));
+    const p=(await post(admin,'/admin/products',{name:'Generated SKU Product',category:'T-shirt',sellingType:'CONTINUOUS',variants:[{price:'85000',color:'   ',size:''}]})).product;
+    assert.match(p.variants[0].sku,/^EKR-[0-9A-F]{12}$/);assert.equal(p.variants[0].size,'STANDARD');assert.equal(p.variants[0].color,'STANDARD');
+    const v=(await post(admin,`/admin/products/${p.id}/variants`,{price:'85000',size:' m ',color:' forest   green '})).variant;
+    assert.match(v.sku,/^EKR-[0-9A-F]{12}$/);assert.notEqual(v.sku,p.variants[0].sku);
+    const loaded=(await admin.call('/admin/products')).body.products.find(x=>x.id===p.id);const saved=loaded.variants.find(x=>x.id===v.id);assert.equal(saved.size,'M');assert.equal(saved.color,'FOREST GREEN');
+    assert.equal((await admin.call(`/admin/products/${p.id}/variants`,'POST',{price:'85000',size:'M',color:'Forest Green'})).status,409);
+    assert.equal((await admin.call('/admin/products','POST',{name:'Invalid batch',sellingType:'BATCH',variants:[{price:'265000'}]})).status,400);
+    assert.equal((await admin.call('/admin/products','POST',{name:'Invalid batch size',sellingType:'BATCH',variants:[{price:'265000',size:'anything'}]})).status,400);
+    await admin.call(`/admin/products/${p.id}`,'PATCH',{name:'Renamed',category:'Community Kits'});
+    const edited=(await admin.call('/admin/products')).body.products.find(x=>x.id===p.id);assert.equal(edited.category,'Community Kits');assert.equal(edited.variants.find(x=>x.id===v.id).sku,v.sku);
+    const legacy=(await post(admin,`/admin/products/${p.id}/variants`,{sku:'EXISTING-EXTERNAL',price:'85000',size:'42',color:'Custom Shade'})).variant;
+    assert.equal(legacy.sku,'EXISTING-EXTERNAL');
+  });
   await t.test('stock, SKU uniqueness and concurrent oversell prevention',async()=>{
     product=(await post(admin,'/admin/products',{name:'Merchandise',sellingType:'CONTINUOUS',status:'PUBLISHED',variants:[{sku:'TEE-ONE',price:'85000',onHand:2}]})).product;
     assert.equal(product.variants[0].size,'STANDARD');

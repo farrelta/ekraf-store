@@ -1,25 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { type Api, type Order, type PaymentMethod, type Product, money, date } from "./types";
+import { type Api, type CatalogOptions, type Order, type PaymentMethod, type Product, money, date } from "./types";
+import { CategorySelect, VariantInputs } from "./catalog-fields";
 import { OrderCard } from "./order-card";
 
 function Field({ label, name, type = "text", required = false, value, min, step }: { label: string; name: string; type?: string; required?: boolean; value?: string | number; min?: string; step?: string }) {
   return <label>{label}<input name={name} type={type} required={required} defaultValue={value} min={min} step={step}/></label>;
 }
-function ActionForm({ children, onSubmit, report, reset = false }: { children: ReactNode; onSubmit: (data: FormData) => Promise<unknown>; report: (message: string) => void; reset?: boolean }) {
+function ActionForm({ children, onSubmit, report, reset = false, onReset }: { children: ReactNode; onSubmit: (data: FormData) => Promise<unknown>; report: (message: string) => void; reset?: boolean; onReset?: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [version, setVersion] = useState(0);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); setBusy(true);
-    try { await onSubmit(data); if (reset) form.reset(); } catch (e) { report((e as Error).message); } finally { setBusy(false); }
+    try { await onSubmit(data); if (reset) { form.reset(); onReset?.(); setVersion(v => v + 1); } } catch (e) { report((e as Error).message); } finally { setBusy(false); }
   }
-  return <form className="product-form" onSubmit={submit}><fieldset disabled={busy}>{children}</fieldset></form>;
+  return <form className="product-form" onSubmit={submit}><fieldset key={version} disabled={busy}>{children}</fieldset></form>;
 }
 const get = (f: FormData, key: string) => String(f.get(key) ?? "").trim();
-const variantData = (f: FormData) => ({ sku: get(f, "sku"), size: get(f, "size") || "STANDARD", color: get(f, "color") || "STANDARD", price: get(f, "price"), onHand: Number(get(f, "onHand")) });
-const variantInputs = <div className="form-grid"><Field label="SKU" name="sku" required/><Field label="Size (blank = no size option)" name="size"/><Field label="Color (blank = no color option)" name="color"/><Field label="Price (IDR)" name="price" type="number" min="1" step="0.01" required/><Field label="Initial stock (zero for batches)" name="onHand" type="number" min="0" step="1" value="0" required/></div>;
+const variantData = (f: FormData) => ({ size: get(f, "size") || "STANDARD", color: get(f, "color") || "STANDARD", price: get(f, "price"), onHand: Number(get(f, "onHand")) });
+const categoryValue = (f: FormData) => (get(f,"categoryChoice") === "Other" ? get(f,"customCategory") : get(f,"categoryChoice")) || null;
 
 export function AdminPanel({ api, report, refreshShop }: { api: Api; report: (message: string) => void; refreshShop: () => Promise<void> }) {
+  const [options, setOptions] = useState<CatalogOptions | null>(null);
+  const [sellingType, setSellingType] = useState<"CONTINUOUS" | "BATCH">("CONTINUOUS");
   const [tab, setTab] = useState("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -28,21 +32,22 @@ export function AdminPanel({ api, report, refreshShop }: { api: Api; report: (me
   const [history, setHistory] = useState<{ id: string; reason: string; onHandDelta: number; reservedDelta: number; createdAt: string; variant: { sku: string } }[]>([]);
   const [search, setSearch] = useState("");
   const load = useCallback(async () => {
-    const [p, o, m] = await Promise.all([api("/api/admin/products"), api("/api/admin/orders"), api("/api/admin/payment-methods")]);
-    setProducts(p.products); setOrders(o.orders); setMethods(m.methods);
+    const [p, o, m, catalog] = await Promise.all([api("/api/admin/products"), api("/api/admin/orders"), api("/api/admin/payment-methods"), api("/api/admin/catalog-options")]);
+    setProducts(p.products); setOrders(o.orders); setMethods(m.methods); setOptions(catalog);
   }, [api]);
   useEffect(() => { void load().catch(e => report(e.message)); }, [load, report]);
   const mutate = async (url: string, data: unknown, method = "POST") => { await api(url, { method, body: JSON.stringify(data) }); await Promise.all([load(), refreshShop()]); report("Saved successfully."); };
   const batchProducts = products.filter(p => p.sellingType === "BATCH");
+  if (!options) return <section className="staff-page">Loading catalog options…</section>;
   return <section className="staff-page"><p className="eyebrow">EKRAF ADMIN</p><h1>Manage the store</h1><nav className="admin-tabs">{["products", "batches", "payments", "orders"].map(t => <button className={tab === t ? "button-primary" : "button-secondary"} key={t} onClick={() => setTab(t)}>{t}</button>)}</nav>
     {tab === "products" && <>
-      <ActionForm report={report} reset onSubmit={f => mutate("/api/admin/products", { name: get(f,"name"), category: get(f,"category") || null, description: get(f,"description"), imageKey: get(f,"imageKey") || null, sellingType: get(f,"sellingType"), status: get(f,"status"), variants: [variantData(f)] })}><h2>Add product</h2><div className="form-grid"><Field label="Product name" name="name" required/><Field label="Category" name="category"/><label>Selling type<select name="sellingType"><option value="CONTINUOUS">Continuous · ready stock</option><option value="BATCH">Batch · preset size + embroidery name</option></select></label><label>Status<select name="status"><option>DRAFT</option><option>PUBLISHED</option></select></label><Field label="Product image URL (HTTPS)" name="imageKey" type="url"/></div><label>Description<textarea name="description"/></label><p>First variant — batch products need a preset size and zero initial stock.</p>{variantInputs}<button className="button-primary">Create product</button></ActionForm>
+      <ActionForm report={report} reset onReset={() => setSellingType("CONTINUOUS")} onSubmit={f => mutate("/api/admin/products", { name: get(f,"name"), category: categoryValue(f), description: get(f,"description"), imageKey: get(f,"imageKey") || null, sellingType: get(f,"sellingType"), status: get(f,"status"), variants: [variantData(f)] })}><h2>Add product</h2><div className="form-grid"><Field label="Product name" name="name" required/><CategorySelect options={options}/><label>Selling type<select name="sellingType" aria-label="Selling type" value={sellingType} onChange={e => setSellingType(e.target.value as "CONTINUOUS" | "BATCH")}><option value="CONTINUOUS">Continuous · ready stock</option><option value="BATCH">Batch · preset size + embroidery name</option></select></label><label>Status<select name="status"><option>DRAFT</option><option>PUBLISHED</option></select></label><Field label="Product image URL (HTTPS)" name="imageKey" type="url"/></div><label>Description<textarea name="description"/></label><p>First variant — batch products need a preset size and zero initial stock.</p><VariantInputs options={options} sellingType={sellingType}/><button className="button-primary">Create product</button></ActionForm>
       {products.map(p => <article className="admin-product" key={p.id}>
-        <ActionForm report={report} onSubmit={f => mutate(`/api/admin/products/${p.id}`, { name: get(f,"name"), category: get(f,"category") || null, description: get(f,"description"), imageKey: get(f,"imageKey") || null, status: get(f,"status") }, "PATCH")}><h2>{p.name} <small>{p.sellingType}</small></h2><div className="form-grid"><Field label="Name" name="name" value={p.name} required/><Field label="Category" name="category" value={p.category || ""}/><Field label="Image URL (HTTPS)" name="imageKey" value={p.imageKey || ""} type="url"/><label>Status<select name="status" defaultValue={p.status}><option>DRAFT</option><option>PUBLISHED</option><option>ARCHIVED</option></select></label></div><label>Description<textarea name="description" defaultValue={p.description}/></label><button className="button-secondary">Save product</button></ActionForm>
+        <ActionForm report={report} onSubmit={f => mutate(`/api/admin/products/${p.id}`, { name: get(f,"name"), category: categoryValue(f), description: get(f,"description"), imageKey: get(f,"imageKey") || null, status: get(f,"status") }, "PATCH")}><h2>{p.name} <small>{p.sellingType}</small></h2><div className="form-grid"><Field label="Name" name="name" value={p.name} required/><CategorySelect key={p.category ?? "no-category"} options={options} current={p.category}/><Field label="Image URL (HTTPS)" name="imageKey" value={p.imageKey || ""} type="url"/><label>Status<select name="status" defaultValue={p.status}><option>DRAFT</option><option>PUBLISHED</option><option>ARCHIVED</option></select></label></div><label>Description<textarea name="description" defaultValue={p.description}/></label><button className="button-secondary">Save product</button></ActionForm>
         {p.variants.map(v => <div className="variant-admin" key={v.id}><ActionForm report={report} onSubmit={f => mutate(`/api/admin/variants/${v.id}`, { price: get(f,"price"), active: f.get("active") === "on" }, "PATCH")}><h3>{v.sku} · {v.size} / {v.color}</h3><p>{v.onHand} on hand · {v.reserved} reserved · {v.onHand-v.reserved} available</p><div className="form-grid"><Field label="Price (IDR)" name="price" value={v.price} type="number" min="1" step="0.01" required/><label className="active-toggle"><input type="checkbox" name="active" defaultChecked={v.active}/> Active variant</label></div><button className="button-secondary">Save variant</button></ActionForm>
           {p.sellingType === "CONTINUOUS" && <ActionForm report={report} onSubmit={f => mutate(`/api/admin/variants/${v.id}/stock`, { onHand: Number(get(f,"onHand")), reason: get(f,"reason") })}><div className="form-grid"><Field label="New physical stock" name="onHand" type="number" min={String(v.reserved)} step="1" value={v.onHand} required/><Field label="Adjustment reason" name="reason" required/></div><button className="button-secondary">Adjust stock</button></ActionForm>}
         </div>)}
-        <details><summary>Add another variant</summary><ActionForm reset report={report} onSubmit={f => mutate(`/api/admin/products/${p.id}/variants`, variantData(f))}>{variantInputs}<button className="button-secondary">Add variant</button></ActionForm></details>
+        <details><summary>Add another variant</summary><ActionForm reset report={report} onSubmit={f => mutate(`/api/admin/products/${p.id}/variants`, variantData(f))}><VariantInputs options={options} sellingType={p.sellingType}/><button className="button-secondary">Add variant</button></ActionForm></details>
         <button className="quiet" onClick={() => void api(`/api/admin/products/${p.id}/inventory`).then(d => setHistory(d.movements)).catch(e => report(e.message))}>View stock history</button>
       </article>)}
       {history.length > 0 && <article className="order-card"><h2>Stock history</h2>{history.map(m => <p key={m.id}>{date(m.createdAt)} · {m.variant.sku} · {m.reason} · physical {m.onHandDelta > 0 ? "+" : ""}{m.onHandDelta}, reserved {m.reservedDelta > 0 ? "+" : ""}{m.reservedDelta}</p>)}<button className="quiet" onClick={() => setHistory([])}>Close history</button></article>}
