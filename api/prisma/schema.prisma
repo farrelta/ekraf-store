@@ -116,6 +116,7 @@ model User {
 }
 
 model Product {
+  featured    Boolean          @default(false)
   id          String           @id @default(cuid())
   category    String?
   name        String
@@ -152,6 +153,7 @@ model ProductVariant {
 }
 
 model Batch {
+  updatedAt       DateTime            @updatedAt @map("updated_at")
   id              String              @id @default(cuid())
   productId       String              @map("product_id")
   product         Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -255,8 +257,9 @@ model InventoryMovement {
   orderItemId   String?               @map("order_item_id")
   orderItem     OrderItem?            @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   id            String                @id @default(cuid())
-  variantId     String                @map("variant_id")
-  variant       ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  variantId     String?               @map("variant_id")
+  variantSku    String                @map("variant_sku")
+  variant       ProductVariant?       @relation(fields: [variantId], references: [id], onDelete: SetNull)
   orderId       String?               @map("order_id")
   order         Order?                @relation(fields: [orderId], references: [id], onDelete: Restrict)
   batchId       String?               @map("batch_id")

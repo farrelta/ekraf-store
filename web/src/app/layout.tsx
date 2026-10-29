@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "../style.css";
+import { StoreProvider } from "@/features/store/store-provider";
 
 export const metadata: Metadata = {
   title: "EKRAF | BEM MIPA UGM",
@@ -8,13 +9,17 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#143a32",
+  themeColor: "#00552e",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="id">
-      <body>{children}</body>
+    <html lang="en">
+      <body>
+        <StoreProvider>{children}</StoreProvider>
+      </body>
     </html>
   );
 }

@@ -6,6 +6,7 @@ import path from "node:path";
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
 import { allocateBatch, expireOrders, fail, move, orderDto, orderInclude, quantities, releaseOrder, total, transaction, paymentSummary } from "./store-service.js";
 import { canTransitionFulfillment } from "./order-policy.js";
+import { registerQueryRoutes } from "./store-queries.js";
 import { catalogOptions, createWithSkus, optionSchema } from "./catalog.js";
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler => (req, res, next) => { void fn(req, res).catch(next); };
@@ -14,20 +15,15 @@ const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
 const image = z.string().url().max(2048).refine(v => v.startsWith("https://"), "Use an HTTPS image URL").nullable().optional();
 const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
-const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT") });
+const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false) });
 const productInclude = { variants: { orderBy: { sku: "asc" as const } }, batches: { orderBy: { closesAt: "desc" as const } } };
 const receiptDirectory = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
 const normalizeVariant = (v: z.output<typeof variantSchema> & { sku: string }) => ({ ...v, price: new Prisma.Decimal(v.price) });
 
 export function registerStoreRoutes(app: Express, db: PrismaClient, auth: RequestHandler, admin: RequestHandler) {
   app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  registerQueryRoutes(app, db, auth, admin);
   app.get("/api/admin/catalog-options", admin, (_req, res) => res.json(catalogOptions));
-  app.get("/api/products", route(async (req, res) => {
-    const { search } = z.object({ search: z.string().trim().max(100).optional() }).parse(req.query);
-    const products = await db.product.findMany({ where: { status: "PUBLISHED", ...(search ? { name: { contains: search, mode: "insensitive" } } : {}) }, include: { variants: { where: { active: true }, orderBy: { sku: "asc" } }, batches: { where: { status: "OPEN", opensAt: { lte: new Date() }, closesAt: { gt: new Date() } }, orderBy: { closesAt: "asc" } } }, orderBy: { name: "asc" } });
-    res.json({ products });
-  }));
-  app.get("/api/admin/products", admin, route(async (_req, res) => res.json({ products: await db.product.findMany({ include: productInclude, orderBy: { createdAt: "desc" } }) })));
   app.post("/api/admin/products", admin, route(async (req, res) => {
     const { variants, ...data } = productFields.extend({ variants: z.array(variantSchema).min(1).max(100) }).parse(req.body);
     if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || v.size === "STANDARD" || !catalogOptions.sizes.includes(v.size))) fail("Batch products need a preset clothing size and start with zero ready stock", 400);
@@ -46,6 +42,24 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     const product = await db.product.update({ where: { id: param(req, "id") }, data, include: productInclude });
     res.json({ product });
   }));
+  app.delete("/api/admin/products/:id", admin, route(async (req, res) => {
+    await transaction(db, async tx => {
+      const productId = param(req, "id");
+      const product = await tx.product.findUnique({ where: { id: productId } });
+      if (!product) return fail("Product not found", 404);
+      if (product.status !== "DRAFT") fail("Only unused drafts can be permanently deleted. Archive this product instead.");
+      const [batches, items, movements, stock] = await Promise.all([
+        tx.batch.count({ where: { productId } }),
+        tx.orderItem.count({ where: { variant: { productId } } }),
+        tx.inventoryMovement.count({ where: { variant: { productId } } }),
+        tx.productVariant.count({ where: { productId, OR: [{ onHand: { not: 0 } }, { reserved: { not: 0 } }] } }),
+      ]);
+      if (batches || items || movements || stock) fail("This product has batches, orders, stock, or stock history. Archive it instead.");
+      await tx.productVariant.deleteMany({ where: { productId } });
+      await tx.product.delete({ where: { id: productId } });
+    });
+    res.status(204).end();
+  }));
   app.post("/api/admin/products/:id/variants", admin, route(async (req, res) => {
     const data = variantSchema.parse(req.body);
     const variant = await createWithSkus(db, [data], ([assigned]) => transaction(db, async tx => {
@@ -57,6 +71,22 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return created;
     }));
     res.status(201).json({ variant });
+  }));
+  app.delete("/api/admin/variants/:id", admin, route(async (req, res) => {
+    await transaction(db, async tx => {
+      const variant = await tx.productVariant.findUnique({ where: { id: param(req, "id") } });
+      if (!variant) return fail("Variant not found", 404);
+      // Serialize deletions for the same product before checking its variant count.
+      await tx.product.update({ where: { id: variant.productId }, data: { updatedAt: new Date() } });
+      const [count, items] = await Promise.all([
+        tx.productVariant.count({ where: { productId: variant.productId } }),
+        tx.orderItem.count({ where: { variantId: variant.id } }),
+      ]);
+      if (count <= 1) fail("Keep at least one variant per product.");
+      if (items) fail("This variant has order history. Disable it instead.");
+      await tx.productVariant.delete({ where: { id: variant.id } });
+    });
+    res.status(204).end();
   }));
   app.patch("/api/admin/variants/:id", admin, route(async (req, res) => {
     const data = z.object({ price: money.optional(), active: z.boolean().optional() }).parse(req.body);
@@ -77,6 +107,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   app.post("/api/admin/batches", admin, route(async (req, res) => {
     const data = z.object({ productId: text, name: text, opensAt: z.iso.datetime(), closesAt: z.iso.datetime(), productionWeeks: z.number().int().min(1).max(52).default(4), announcement: z.string().max(2000).default(""), status: z.enum(["DRAFT", "OPEN"]).default("DRAFT") }).parse(req.body);
     if (new Date(data.opensAt) >= new Date(data.closesAt)) fail("Opening must precede closing", 400);
+    if (new Date(data.closesAt) <= new Date()) fail("Choose a future closing date", 400);
     const batch = await transaction(db, async tx => {
       const p = await tx.product.findUniqueOrThrow({ where: { id: data.productId } });
       if (p.sellingType !== "BATCH") fail("Choose a batch product", 400);
@@ -85,11 +116,17 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     res.status(201).json({ batch });
   }));
   app.patch("/api/admin/batches/:id", admin, route(async (req, res) => {
-    const data = z.object({ status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional() }).parse(req.body);
+    const data = z.object({ status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional(), opensAt: z.iso.datetime().optional(), closesAt: z.iso.datetime().optional(), productionWeeks: z.number().int().min(1).max(52).optional() }).parse(req.body);
     const batch = await transaction(db, async tx => {
       const current = await tx.batch.findUniqueOrThrow({ where: { id: param(req, "id") } });
+      if (data.opensAt || data.closesAt) {
+        if (!["DRAFT","OPEN"].includes(current.status)) fail("Dates can only change while draft or open");
+        const opens = new Date(data.opensAt ?? current.opensAt), closes = new Date(data.closesAt ?? current.closesAt);
+        if (opens >= closes || closes <= new Date()) fail("Choose a valid window with a future closing date",400);
+      }
       const paths: Record<string, string[]> = { DRAFT: ["OPEN", "CANCELLED"], OPEN: ["CLOSED", "CANCELLED"], CLOSED: ["IN_PRODUCTION", "CANCELLED"], IN_PRODUCTION: ["READY"], READY: ["COMPLETED"] };
       if (data.status && data.status !== current.status && !paths[current.status]?.includes(data.status)) fail("Invalid batch transition");
+      if (data.status === "OPEN" && new Date(data.closesAt ?? current.closesAt) <= new Date()) fail("Choose a future closing date before opening the batch", 400);
       if (data.status === "CANCELLED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID", "PENDING"] } } } })) fail("Resolve existing orders before cancelling a batch");
       if (data.status === "COMPLETED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID"] } }, pickupStatus: { not: "COMPLETED" } } })) fail("Orders still await pickup");
       return tx.batch.update({ where: { id: current.id }, data });
@@ -155,11 +192,6 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (!old || old.userId !== req.session.userId) throw error;
       res.json({ order: orderDto(old) });
     }
-  }));
-  app.get("/api/orders", auth, route(async (req, res) => res.json({ orders: (await db.order.findMany({ where: { userId: req.session.userId }, include: orderInclude, orderBy: { createdAt: "desc" }, take: 100 })).map(orderDto) })));
-  app.get("/api/admin/orders", admin, route(async (req, res) => {
-    const { q } = z.object({ q: z.string().trim().max(100).optional() }).parse(req.query);
-    res.json({ orders: (await db.order.findMany({ where: q ? { OR: [{ id: { contains: q } }, { customerName: { contains: q, mode: "insensitive" } }] } : {}, include: orderInclude, orderBy: { createdAt: "desc" }, take: 100 })).map(orderDto) });
   }));
   app.post("/api/orders/:id/cancel", auth, route(async (req, res) => {
     await transaction(db, async tx => {

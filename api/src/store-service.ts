@@ -29,7 +29,7 @@ export async function move(tx: Prisma.TransactionClient, data: {
   const v = await tx.productVariant.findUniqueOrThrow({ where: { id: data.variantId } });
   if (v.onHand + data.onHandDelta < 0 || v.reserved + data.reservedDelta < 0 || v.reserved + data.reservedDelta > v.onHand + data.onHandDelta) fail("Insufficient available stock");
   await tx.productVariant.update({ where: { id: v.id }, data: { onHand: { increment: data.onHandDelta }, reserved: { increment: data.reservedDelta } } });
-  await tx.inventoryMovement.create({ data });
+  await tx.inventoryMovement.create({ data: { ...data, variantSku: v.sku } });
 }
 export function quantities(items: { variantId: string; quantity: number }[]) {
   const grouped = new Map<string, number>();

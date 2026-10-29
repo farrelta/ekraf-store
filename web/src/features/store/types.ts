@@ -1,11 +1,11 @@
 export type User = { id: string; name: string; email: string; role: "ADMIN" | "CUSTOMER" };
 export type CatalogOptions = { categories: string[]; sizes: string[]; colors: string[] };
 export type Variant = { id: string; sku: string; size: string; color: string; price: string; onHand: number; reserved: number; active: boolean };
-export type Batch = { id: string; name: string; status: string; opensAt: string; closesAt: string; productionWeeks: number; announcement: string };
-export type Product = { id: string; name: string; description: string; category: string | null; imageKey: string | null; sellingType: "CONTINUOUS" | "BATCH"; status: string; variants: Variant[]; batches: Batch[] };
+export type Batch = { id: string; name: string; status: string; opensAt: string; closesAt: string; productionWeeks: number; announcement: string; createdAt: string; updatedAt: string };
+export type Product = { id: string; name: string; description: string; category: string | null; imageKey: string | null; sellingType: "CONTINUOUS" | "BATCH"; status: string; featured: boolean; createdAt: string; updatedAt: string; variants: Variant[]; batches: Batch[] };
 export type PaymentMethod = { id: string; type: "QRIS" | "BANK_TRANSFER"; name: string; instructions: string; qrImageKey: string | null; bankName: string | null; accountName: string | null; accountNumber: string | null; enabled: boolean };
 export type Submission = { phase: "INITIAL" | "BALANCE"; id: string; status: string; amount: string; transactionReference: string | null; reviewReason: string | null; submittedAt: string; methodSnapshot: Partial<PaymentMethod> };
 export type Order = { id: string; paymentPlan: "FULL" | "BATCH_DEPOSIT"; initialAmount: string; amountDue: string; paidAmount: string; remainingBalance: string; phase: "INITIAL" | "BALANCE"; customerName: string; customerPhone: string; paymentStatus: string; pickupStatus: string; total: string; expiresAt: string; createdAt: string; items: { id: string; batchId: string | null; pickupStatus: string; itemDescription: string; quantity: number; unitPrice: string; embroideryName: string | null }[]; paymentSubmissions: Submission[] };
 export type Api = (path: string, options?: RequestInit) => Promise<any>;
 export const money = (amount: string | number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(amount));
-export const date = (value: string) => new Date(value).toLocaleString("id-ID");
+export const date = (value: string) => new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });

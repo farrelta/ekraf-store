@@ -83,6 +83,7 @@ Table products [headercolor: #175e7a] {
   image_key text
   selling_type selling_types [not null]
   status product_status [not null, default: 'DRAFT']
+  featured boolean [not null, default: false]
   created_at timestamp [not null, default: `now()`]
   updated_at timestamp [not null]
   indexes {
@@ -118,6 +119,7 @@ Table batches [headercolor: #175e7a] {
   production_weeks integer [not null, default: 4]
   announcement text
   created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null]
   indexes {
     (product_id, name) [unique]
     (status, closes_at)
@@ -199,7 +201,8 @@ Table payment_submissions [headercolor: #175e7a] {
 Table inventory_movements [headercolor: #175e7a] {
   order_item_id text
   id text [pk, not null]
-  variant_id text [not null]
+  variant_id text
+  variant_sku text [not null]
   order_id text
   batch_id text
   actor_id text
@@ -245,7 +248,7 @@ Ref submission_reviewer {
   payment_submissions.reviewed_by > users.id [delete: restrict, update: cascade]
 }
 Ref movement_variant {
-  inventory_movements.variant_id > product_variants.id [delete: restrict, update: cascade]
+  inventory_movements.variant_id > product_variants.id [delete: set null, update: cascade]
 }
 Ref movement_order {
   inventory_movements.order_id > orders.id [delete: restrict, update: cascade]

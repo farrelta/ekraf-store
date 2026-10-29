@@ -23,7 +23,7 @@ Use your real email and a unique password. The script refuses to create another 
 
 ## Populate the store
 
-Open the private admin URL described below and sign in there. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Choose No size when a product has no size option; blank color becomes STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
+Open the private admin URL described below and sign in there. In Admin > Payment Settings, enter official bank or QRIS details. In Products, create a product and its first variant. Choose No size when a product has no size option; blank color becomes STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
 
 Stock adjustments for continuous products require a reason. Batch stock is received through the batch receipt form. Products are archived and variants/payment methods are disabled rather than deleted.
 
@@ -37,7 +37,7 @@ Stock adjustments for continuous products require a reason. Batch stock is recei
 - `NODE_ENV`: development, test, or production. Production requires HTTPS cookies.
 - `RECEIPT_STORAGE_DIR`: optional absolute private directory; default is storage/receipts relative to the API working directory. Use persistent storage in deployment.
 
-The previous PAYMENT_INSTRUCTIONS setting is unused. Official payment details now live in Admin > Payments.
+The previous PAYMENT_INSTRUCTIONS setting is unused. Official payment details now live in Admin > Payment Settings.
 
 ## Validation
 
@@ -51,7 +51,7 @@ npm --workspace api run test:integration
 Remove-Item Env:DATABASE_URL, Env:TEST_DATABASE_URL
 ```
 
-Create that test database first. Integration tests populate it with test accounts/orders; do not point them at your development or production database. Optional browser checks use Python Playwright and the webapp-testing server helper.
+Create that test database first. Integration tests populate it with test accounts/orders; do not point them at your development or production database. Browser checks use Python Playwright with `web/test/run-smoke.py`. See `docs/FLOWSTEP.md` for the isolated API port and build configuration.
 
 ## Private admin panel
 

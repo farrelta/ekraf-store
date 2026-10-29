@@ -4,6 +4,7 @@ Next.js App Router renders the storefront, account orders, and an on-demand admi
 
 - `api/src/index.ts`: application configuration, sessions, authentication, role checks, error handling and worker lifecycle.
 - `api/src/store-routes.ts`: validated store/admin HTTP interfaces and private receipt access.
+- `api/src/store-queries.ts`: paginated catalogs, operational reporting, dashboard calculations and safe CSV exports.
 - `api/src/store-service.ts`: serializable transaction retries, order totals, inventory movements, batch allocation and expiry.
 - `web/src/features/store`: storefront, typed display data, order/payment forms and separately loaded admin tools.
 
@@ -14,3 +15,5 @@ Only CUSTOMER and ADMIN exist. Every privileged request reloads the role from th
 The browser never chooses prices, totals, stock changes, reviewers or payment decisions. Checkout uses UUID idempotency keys; concurrent stock changes run in serializable transactions with bounded retries. Stock history is append-only. Approved/rejected payment evidence is immutable. One-minute expiry skips receipts awaiting review. Batch receipts are allocated separately by production window.
 
 Payment receipts use persistent private local disk storage in this initial version. Multi-host deployment needs shared private storage or an object-store implementation. Product and QRIS images use approved HTTPS URLs. The app has no payment gateway, shipping integration, general audit log, product review system or automated refunds.
+
+See [Flowstep implementation](FLOWSTEP.md) for the dedicated page routes, responsive layouts, query filters, date definitions, migration rehearsal, and browser validation workflow.

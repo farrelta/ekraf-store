@@ -1,5 +1,9 @@
-import Storefront from "@/features/store/storefront";
-
-export default function HomePage() {
-  return <Storefront />;
+import { Suspense } from "react";
+import { ShopPage } from "@/features/store/store-pages";
+export default function Page() {
+  return (
+    <Suspense fallback={<p className="empty">Loading…</p>}>
+      <ShopPage />
+    </Suspense>
+  );
 }
