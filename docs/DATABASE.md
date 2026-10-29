@@ -1,25 +1,46 @@
-# Database, migration, backup, and restore
+# Database
 
-PostgreSQL is the source of truth. `api/prisma/schema.prisma` defines the schema and `api/prisma/migrations/` contains committed SQL migrations. Monetary amounts use fixed precision `Decimal(12,2)`; the currency is stored as `IDR`. Order items snapshot product name, unit price, quantity, and line total. Product deactivation preserves order history; order item product references become nullable if a product is removed.
+The app has nine Prisma models mapped to snake_case tables: `users`, `products`, `product_variants`, `batches`, `orders`, `order_items`, `payment_methods`, `payment_submissions`, and `inventory_movements`. Express also uses the infrastructure `session` table; Prisma maintains `_prisma_migrations`. The importable diagram is `docs/schema.dbml`.
 
-## Inventory behavior
+## Roles and catalog
 
-Checkout reserves stock by decrementing it inside a serializable transaction. Conditional `stock >= quantity` updates prevent overselling; failed transactions roll back all decrements. Each order reserves stock for 48 hours. A worker in the API checks each minute and atomically marks expired pending orders and restores their stock once. Customers can cancel only pending orders, and treasurers can reject a payment; either path marks fulfillment cancelled and records matching stock movements in the same transaction. This requires the API process to be running for expiry automation. Monitor pending orders and keep a single API instance until worker coordination is externalized.
+Roles are `ADMIN` and `CUSTOMER`; self-registration always creates a customer. Every privileged request reloads the account role from PostgreSQL. An admin reviews payment proofs as well as managing products, variants, batches, and pickup.
 
-## Migrations
+A product is either `CONTINUOUS` or `BATCH`, with `DRAFT`, `PUBLISHED`, or `ARCHIVED` publication status. Products are created with at least one variant. Size/color are normalized to uppercase; STANDARD represents an option that is not offered. Batch products require preset sizes and start with zero ready stock. Prices and inventory exist only on variants. SKU and product/size/color combinations are unique. There are no separate categories/options/reviews/gallery/audit tables.
 
-Run `npm run db:generate` after schema changes, create a reviewed migration in development, and commit both schema and migration SQL. Production uses `npm run db:migrate` (`prisma migrate deploy`). Take a backup before applying migrations; prefer additive migrations and a maintenance window for destructive changes. No production database is currently configured.
+## Orders and inventory
 
-## Backup baseline to configure before launch
+Orders contain continuous items or items from one production batch. The storefront splits mixed bags into separately payable orders. A batch item requires an embroidery name; different names remain separate order lines. Item descriptions and prices are immutable snapshots through the API. Total is calculated using Decimal arithmetic, in IDR. Campus pickup is the only fulfillment method.
 
-Use the managed database's scheduled encrypted backups or `pg_dump` to a separate organization-controlled storage account. Keep daily backups for at least 14 days and a monthly copy for 3 months. Restrict access and encrypt exports. Never store backups only on the app host or in this repository. The retention values are a proposed baseline, not an active configuration.
+Continuous checkout increments reserved quantity, using serializable transactions with bounded retries. Availability is on-hand minus reserved. Cancellation or expiry releases reservations exactly once. Approval consumes continuous reservations and physical stock; pickup must not consume them again.
 
-Example manual export and restore against a non-production database:
+Batch checkout and payment do not consume ready stock. Admins close the batch, receive production quantities, and the API allocates stock to its paid orders in creation order. Only fully allocated orders become ready for pickup. Ledger entries tag receipts/reservations with their batch, preventing another batch from spending those receipts. Collection consumes the batch reservation and physical stock.
 
-```sh
-pg_dump --format=custom --no-owner "$DATABASE_URL" --file=mipa-store-YYYYMMDD.dump
-createdb mipa_store_restore_check
-pg_restore --no-owner --dbname="$RESTORE_DATABASE_URL" mipa-store-YYYYMMDD.dump
+Every inventory change appends a movement in the same transaction as its balance update. SQL rejects ledger updates/deletes, negative stock, invalid reservations, nonpositive prices/quantities, invalid batch dates, and zero-change movements. Referenced records cannot be deleted.
+
+## Payments and expiry
+
+Orders have a 48-hour deadline. Timely submitted proof holds the order and stock while awaiting review. Rejection permits a new submission before the original deadline; rejection after it expires the order and releases ready-stock reservations. The worker checks overdue unpaid orders every minute and skips submitted proofs. It coordinates through serializable transactions and runs only while the API is running.
+
+Each submission snapshots the selected bank/QRIS details. Actual payment must be verified by an admin against the official account. Partial unique indexes allow at most one pending and one verified submission per order and prevent reuse of a verified transaction reference for the same payment method. Reviewed evidence is immutable through SQL triggers. Receipts are stored outside the public web directory and are served only to their owner or an admin.
+
+## Migrations and fresh local reset
+
+Migration history is retained: the original baseline, the earlier additive Flowstep migration, and the new `20261030000000_minimal_ekraf` forward migration. The last migration deliberately rebuilds empty legacy application tables and refuses populated legacy users/products/orders. It preserves session storage. This is intended for the authorized local fresh start, not migration of a populated production database.
+
+Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:check`. The checker is read-only and reconciles variant balances against the stock ledger, verifies product/batch relationships, and checks payment consistency.
+
+To deliberately discard this project's local database again:
+
+```powershell
+docker compose -p mipa-store down --volumes
+docker compose -p mipa-store up -d --wait
+npm run db:migrate
+npm run db:generate
 ```
 
-After restoring, run migrations if required and verify product count, a test order with snapshots, payment history, and session availability. Delete the temporary restore database after sign-off. A restoration has not yet been run; schedule and record a restore exercise before launch and every six months.
+This removes all users, products, orders, and payments in the project volume. It does not remove Docker Desktop or other projects' resources. Receipt files are outside the database volume and require separate retention/cleanup decisions.
+
+## Backup
+
+Back up both PostgreSQL and the private receipt directory to restricted storage outside the app host. Restore them together to a separate environment and verify item snapshots, payment history, receipt access, and inventory reconciliation. Configure scheduled backups and record a restore exercise before production rollout. No remote backup service is configured by this repository.

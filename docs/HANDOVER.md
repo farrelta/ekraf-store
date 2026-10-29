@@ -17,7 +17,7 @@ Record service owner, backup owner, renewal/billing date, monthly cost, recovery
 ## Member onboarding/offboarding
 
 1. Approve access with the organization lead and service owner. Use an individual account, MFA, and least privilege; do not share personal passwords.
-2. Grant repository and hosting access through organization teams. Make the new treasurer an app `TREASURER` account through a reviewed database/admin procedure.
+2. Grant repository and hosting access through organization teams. Make the new treasurer an app `ADMIN` account through a reviewed database/admin procedure.
 3. Walk through deploy, payment reconciliation, expiry behavior, backup checking, and restore procedure. Confirm they can reach two maintainers.
 4. On departure, remove organization and provider access, rotate shared/service credentials, invalidate sessions, review audit history, and transfer renewal/contact ownership.
 

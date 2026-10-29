@@ -1,32 +1,17 @@
-# Security notes and threat model
+# Security controls
 
-## Controls present
+- Public registration always creates CUSTOMER. ADMIN is the only privileged role. Server middleware reloads the account role from PostgreSQL before protected requests.
+- Passwords use Argon2id. Sessions live in PostgreSQL with HttpOnly, SameSite=Lax, and production Secure cookies. Mutations require session CSRF tokens and an exact allowed Origin.
+- Helmet headers, login throttling, input bounds, parameterized queries, safe server errors, and no-store API responses are enabled.
+- Checkout uses server catalog prices, opaque order identifiers, immutable price/description snapshots, UUID idempotency keys, serializable transactions, bounded conflict retries, and stock-availability checks. Owners can see only their orders; admins review all orders.
+- Payment approval requires manual official-account reconciliation and a verified reference. SQL prevents duplicate pending/verified submissions and reference reuse per method; reviewed evidence and inventory history cannot be rewritten through updates/deletes.
+- Receipt uploads require authentication, CSRF, PNG/JPEG signatures, and a maximum 5 MB body. Files have random server-generated names outside the public directory. Only owners/admins can retrieve them. Product and QRIS images use HTTPS URLs.
+- Real PostgreSQL integration tests cover oversell races, duplicate approvals, private receipt access, rejection/resubmission, expiry holds, batch allocation, and historical snapshots.
 
-- Passwords use Argon2id. There is no public admin registration; public sign-up always creates a customer.
-- Privileged routes check session roles on the server. Product management and fulfillment require `ADMIN`; payment review allows `ADMIN` and `TREASURER`.
-- PostgreSQL-backed sessions use `HttpOnly`, `SameSite=Lax`, and production-only `Secure` cookies. Writes require a session-bound CSRF token and reject a mismatched Origin. CORS allows one configured origin.
-- Helmet security headers, JSON request-size cap, Zod validation, login rate limit, generic login errors, parameterized Prisma queries, and safe 500 responses are enabled.
-- Checkout never accepts browser prices. It snapshots product name and price, uses a serializable transaction and conditional stock decrement, and requires a UUID idempotency key.
-- Customer order lookups are constrained to the signed-in owner. Public order references are random UUIDs. Receipts/references cannot mark payment paid.
-- Payment state and fulfillment state are separate. Decisions require staff role, legal transitions, actor/timestamp/amount/reason history, and rejection/refund reasons. App routes only append payment and audit records.
-- Image URLs are limited to HTTPS; file upload is not implemented.
+## Operational limits
 
-## Threats and remaining work
+This initial app has no password reset, email verification, account MFA, antivirus/content re-encoding service, managed object storage, external monitoring, or general administrative audit log. Login throttling is process-local. Receipt storage is local private disk and must be persistent and backed up with PostgreSQL. Deploy one API instance until shared receipt storage and distributed request limiting are configured.
 
-| Threat | Current mitigation | Remaining concern |
-| --- | --- | --- |
-| Unauthorized payment confirmation | Staff-only endpoint, state transition checks, audit event, manual official-account reconciliation | Staff account takeover; configure MFA/password manager at identity/hosting level and review staff access. |
-| Price/quantity manipulation | Server pricing and Zod quantity bounds | Add integration tests against a real isolated PostgreSQL database. |
-| Overselling | Conditional stock decrement, serializable transaction, reservation release transaction | Expiry runs only while API is up; alert and reconcile after outages. |
-| Account takeover | Argon2id, login limiter, protected sessions | No email verification, password reset, MFA, or distributed rate limiter; single-instance deployment only until changed. |
-| Cross-customer order access | Owner-filtered queries | Verify through integration tests after test DB is available. |
-| Malicious uploads | No uploads accepted | Choose managed object storage and implement content-signature/size validation before upload feature is released. |
-| Duplicate payment processing | Unique idempotency key for order creation and atomic payment transition | Concurrent integration test and manual reconciliation process remain launch requirements. |
-| Customer/transaction data loss | PostgreSQL transactions, operational backup plan | No backup provider or restore test is configured. |
-| Compromised administrator | Separate treasurer role, role checks, audit trail | Organization must use two maintainers, managed MFA, least privilege, and timely offboarding. |
+Admins can change product settings and review financial evidence, so restrict access and use organization-controlled credentials and a password manager. Require hosting/provider MFA and at least two organization maintainers. No payment gateway or automated refund verification is connected; admins must check actual account statements before approving.
 
-## Secret handling and response
-
-Keep `.env` and production secrets in a secret manager; rotate credentials when a maintainer leaves or compromise is suspected. Never log passwords, cookies, payment references, or full connection strings. Production must use HTTPS and a least-privilege database account. The session secret invalidates existing sessions when rotated. See `OPERATIONS.md` for response steps.
-
-This checklist is not a security certification. Production review, integration tests, access ownership, backup/restore, image storage, and account recovery are not yet verified.
+Keep `.env` and passwords out of source control and logs. Use HTTPS, a least-privilege runtime database account, and separate migration credentials. Rotate secrets and invalidate sessions during offboarding or compromise. Verify backups/restoration and assign monitoring owners before production rollout.

@@ -1,19 +1,24 @@
-# MIPA Store
+# EKRAF BEM MIPA UGM Store
 
-A small campus creative economy shop built as a modular monolith. The repository contains a Next.js App Router storefront and an Express API backed by PostgreSQL and Prisma ORM 7. The first version supports pickup orders and manual payment verification; it does not connect to a payment gateway.
+Next.js storefront and Express API backed by PostgreSQL 17 and Prisma 7. The initial version supports stock-tracked merchandise, batch products with preset sizes and embroidery names, manual QRIS/bank verification, and campus pickup.
 
-## Local quick start
+## Local start
 
-Requirements: Node.js 24.11 or newer, npm, and Docker Desktop (or a local PostgreSQL 17 database).
+1. Copy `.env.example` to `.env`; set a random `SESSION_SECRET` of at least 32 characters.
+2. Start Docker Desktop, then run `docker compose up -d --wait`.
+3. Run `npm install`, `npm run db:generate`, and `npm run db:migrate`.
+4. Create the first admin using [SETUP](docs/SETUP.md), then run `npm run dev` and visit http://localhost:5173.
+5. In Admin, add official payment details, products/variants, and production batches. No products, bank accounts, QR codes, or admin passwords are seeded.
 
-1. Copy `.env.example` to `.env` and set a random `SESSION_SECRET` with at least 32 characters. Set `PAYMENT_INSTRUCTIONS` to current approved organizational instructions.
-2. Run `docker compose up -d db`.
-3. Run `npm install`.
-4. Run `npm run db:generate` and `npm run db:migrate`.
-5. Run `npm run dev` and open <http://localhost:5173>.
+Only `ADMIN` and `CUSTOMER` roles exist. Admins manage the catalog, review receipts, receive batch stock, and coordinate pickup. Customers register through the store.
 
-See [docs/SETUP.md](docs/SETUP.md) for account setup and configuration, then [docs/HANDOVER.md](docs/HANDOVER.md) before transferring ownership.
+See [database structure](docs/DATABASE.md), [drawDB schema](docs/schema.dbml), and [payment workflow](docs/PAYMENTS.md). The migration `20261030000000_minimal_ekraf` is a fresh-start transition that refuses to run if legacy users/products/orders contain data. Historical migration files remain for a reproducible deployment chain.
 
-## Current status
+## Checks
 
-This is an MVP foundation, not a production launch approval. No organization payment account, image storage, production hosting, backup service, domain, or GitHub organization ownership has been configured or verified. Product images currently use HTTPS URLs; secure file upload is not implemented. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/OPERATIONS.md](docs/OPERATIONS.md), and [docs/SECURITY.md](docs/SECURITY.md) for remaining work.
+- `npm run build`: compile API and build Next.js.
+- `npm test`: role and pickup/payment transition checks.
+- `npm run db:check`: read-only schema, ledger, and order integrity checks.
+- `npm run test:integration --workspace api`: opt-in integration checks; requires an empty migrated local database ending in `_test` supplied through `TEST_DATABASE_URL`.
+
+Payment receipts are uploaded privately to `api/storage/receipts` by default. Use a persistent private directory and back it up alongside PostgreSQL before deployment. Product and QRIS images use HTTPS URLs. No external payment gateway is connected.

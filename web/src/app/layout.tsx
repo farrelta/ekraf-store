@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "../style.css";
 
 export const metadata: Metadata = {
-  title: "MIPA Store | Campus creative goods",
-  description: "Thoughtful creations from our campus community, made to last.",
+  title: "EKRAF | BEM MIPA UGM",
+  description: "Merchandise and faculty batch pieces from EKRAF BEM MIPA UGM.",
 };
 
 export const viewport: Viewport = {

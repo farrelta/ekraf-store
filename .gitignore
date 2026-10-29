@@ -9,4 +9,5 @@ coverage/
 !.env.example
 *.log
 api/src/generated/
+api/storage/
 .agents/

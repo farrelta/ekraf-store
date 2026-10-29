@@ -10,7 +10,7 @@ Before selecting providers, compare current official pricing and limits for: one
 
 1. Give the organization control of its GitHub repository, hosting, domain registrar/DNS, database, image storage, and payment account.
 2. Use a managed PostgreSQL database with automated backups and tested restore. Create a least-privilege database user for the app.
-3. Host one persistent Next.js server and one persistent API instance under HTTPS. Provide `API_INTERNAL_ORIGIN` to the Next.js build environment so its `/api` rewrite targets the API's private reachable origin; keep `FRONTEND_ORIGIN` set to the exact public browser origin so CORS and CSRF origin checks match. Set `DATABASE_URL`, `SESSION_SECRET`, `PAYMENT_INSTRUCTIONS`, and `NODE_ENV=production` in the API host's secret manager.
+3. Host one persistent Next.js server and one persistent API instance under HTTPS. Provide `API_INTERNAL_ORIGIN` to the Next.js build environment so its `/api` rewrite targets the API's private reachable origin; keep `FRONTEND_ORIGIN` set to the exact public browser origin so CORS and CSRF origin checks match. Set `DATABASE_URL`, `SESSION_SECRET`, `RECEIPT_STORAGE_DIR`, and `NODE_ENV=production` in the API host's secret manager.
 4. Run `npm ci`, `npm run db:generate`, `npm run db:migrate`, and `npm run build` in CI/deployment. Keep rollback instructions and a pre-migration backup.
 5. Configure health checks to `GET /api/health`. It checks PostgreSQL connectivity. Alert on unhealthy state and failed backups.
 6. Configure product image hosting separately. Until a managed image service is selected, add products with organization-approved HTTPS image URLs only.

@@ -10,140 +10,246 @@ datasource db {
 enum Role {
   CUSTOMER
   ADMIN
-  TREASURER
+
+  @@map("roles")
 }
+
+enum SellingType {
+  CONTINUOUS
+  BATCH
+
+  @@map("selling_types")
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("product_status")
+}
+
+enum BatchStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  IN_PRODUCTION
+  READY
+  COMPLETED
+  CANCELLED
+
+  @@map("batch_status")
+}
+
 enum PaymentStatus {
   PENDING
   PAID
-  REJECTED
-  REFUNDED
   EXPIRED
+  CANCELLED
+
+  @@map("payment_status")
 }
-enum FulfillmentStatus {
+
+enum PickupStatus {
   PENDING
   PROCESSING
   READY_FOR_PICKUP
-  SHIPPED
   COMPLETED
   CANCELLED
+
+  @@map("pickup_status")
 }
+
+enum PaymentMethodType {
+  QRIS
+  BANK_TRANSFER
+
+  @@map("payment_method_types")
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  VERIFIED
+  REJECTED
+
+  @@map("submission_status")
+}
+
 enum InventoryMovementType {
-  ORDER_RESERVATION
-  CANCELLATION_RESTOCK
+  RESERVATION
+  RELEASE
+  RECEIPT
+  SALE
+  RETURN
   ADJUSTMENT
+
+  @@map("inventory_movement_types")
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String              @id @default(cuid())
+  email        String              @unique
   name         String
-  passwordHash String
-  role         Role     @default(CUSTOMER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  passwordHash String              @map("password_hash")
+  role         Role                @default(CUSTOMER)
+  createdAt    DateTime            @default(now()) @map("created_at")
   orders       Order[]
-  decisions    PaymentEvent[] @relation("PaymentDecisionMaker")
-  auditLogs    AuditLog[]
-}
+  reviews      PaymentSubmission[] @relation("Reviewer")
+  movements    InventoryMovement[]
 
-model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  products  Product[]
-  createdAt DateTime @default(now())
+  @@map("users")
 }
 
 model Product {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
+  category    String?
   name        String
-  description String   @default("")
-  imageUrl    String?
-  price       Decimal  @db.Decimal(12, 2)
-  stock       Int      @default(0)
-  active      Boolean  @default(true)
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  orderItems  OrderItem[]
-  movements   InventoryMovement[]
-  @@index([active, name])
-  @@index([categoryId])
+  description String           @default("")
+  imageKey    String?          @map("image_key")
+  sellingType SellingType      @map("selling_type")
+  status      ProductStatus    @default(DRAFT)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  variants    ProductVariant[]
+  batches     Batch[]
+
+  @@index([category])
+  @@index([status, name])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String              @id @default(cuid())
+  productId String              @map("product_id")
+  product   Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  sku       String              @unique
+  size      String              @default("STANDARD")
+  color     String              @default("STANDARD")
+  price     Decimal             @db.Decimal(12, 2)
+  onHand    Int                 @default(0) @map("on_hand")
+  reserved  Int                 @default(0)
+  active    Boolean             @default(true)
+  items     OrderItem[]
+  movements InventoryMovement[]
+
+  @@unique([productId, size, color])
+  @@map("product_variants")
+}
+
+model Batch {
+  id              String              @id @default(cuid())
+  productId       String              @map("product_id")
+  product         Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  name            String
+  status          BatchStatus         @default(DRAFT)
+  opensAt         DateTime            @map("opens_at")
+  closesAt        DateTime            @map("closes_at")
+  productionWeeks Int                 @default(4) @map("production_weeks")
+  announcement    String              @default("")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  orders          Order[]
+  movements       InventoryMovement[]
+
+  @@unique([productId, name])
+  @@index([status, closesAt])
+  @@map("batches")
 }
 
 model Order {
-  id                String   @id @default(cuid())
-  publicId          String   @unique @default(uuid())
-  idempotencyKey    String?  @unique
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Restrict)
-  total             Decimal  @db.Decimal(12, 2)
-  currency          String   @default("IDR")
-  paymentStatus     PaymentStatus @default(PENDING)
-  fulfillmentStatus FulfillmentStatus @default(PENDING)
-  fulfillmentMethod String   @default("PICKUP")
-  fulfillmentNotes  String   @default("")
-  expiresAt         DateTime
-  customerName      String
-  customerPhone     String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  items             OrderItem[]
-  paymentEvents     PaymentEvent[]
-  movements         InventoryMovement[]
+  id                 String              @id @default(cuid())
+  userId             String              @map("user_id")
+  user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  batchId            String?             @map("batch_id")
+  batch              Batch?              @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  idempotencyKey     String              @unique @map("idempotency_key")
+  customerName       String              @map("customer_name")
+  customerPhone      String              @map("customer_phone")
+  paymentStatus      PaymentStatus       @default(PENDING) @map("payment_status")
+  pickupStatus       PickupStatus        @default(PENDING) @map("pickup_status")
+  expiresAt          DateTime            @map("expires_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  items              OrderItem[]
+  paymentSubmissions PaymentSubmission[]
+  movements          InventoryMovement[]
+
   @@index([userId, createdAt])
-  @@index([paymentStatus, fulfillmentStatus, createdAt])
-  @@index([paymentStatus, expiresAt, fulfillmentStatus])
+  @@index([batchId])
+  @@index([paymentStatus, expiresAt])
+  @@map("orders")
 }
 
 model OrderItem {
-  id             String  @id @default(cuid())
-  orderId        String
-  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId      String?
-  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  productName    String
-  unitPrice      Decimal @db.Decimal(12, 2)
-  quantity       Int
-  lineTotal      Decimal @db.Decimal(12, 2)
+  id              String         @id @default(cuid())
+  orderId         String         @map("order_id")
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  variantId       String         @map("variant_id")
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  itemDescription String         @map("item_description")
+  unitPrice       Decimal        @map("unit_price") @db.Decimal(12, 2)
+  quantity        Int
+  embroideryName  String?        @map("embroidery_name")
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
 }
 
-model PaymentEvent {
-  id             String   @id @default(cuid())
-  orderId        String
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  actorId        String?
-  actor          User?    @relation("PaymentDecisionMaker", fields: [actorId], references: [id], onDelete: SetNull)
-  action         String
-  reason         String   @default("")
-  reference      String   @default("")
-  amount         Decimal  @db.Decimal(12, 2)
-  createdAt      DateTime @default(now())
-  @@index([orderId, createdAt])
+model PaymentMethod {
+  id            String              @id @default(cuid())
+  type          PaymentMethodType
+  name          String
+  instructions  String              @default("")
+  qrImageKey    String?             @map("qr_image_key")
+  bankName      String?             @map("bank_name")
+  accountName   String?             @map("account_name")
+  accountNumber String?             @map("account_number")
+  enabled       Boolean             @default(true)
+  submissions   PaymentSubmission[]
+
+  @@map("payment_methods")
+}
+
+model PaymentSubmission {
+  id                   String           @id @default(cuid())
+  orderId              String           @map("order_id")
+  order                Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  paymentMethodId      String           @map("payment_method_id")
+  method               PaymentMethod    @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  methodSnapshot       Json             @map("method_snapshot")
+  amount               Decimal          @db.Decimal(12, 2)
+  transactionReference String?          @map("transaction_reference")
+  proofKey             String           @map("proof_key")
+  status               SubmissionStatus @default(SUBMITTED)
+  reviewedBy           String?          @map("reviewed_by")
+  reviewer             User?            @relation("Reviewer", fields: [reviewedBy], references: [id], onDelete: Restrict)
+  reviewReason         String?          @map("review_reason")
+  submittedAt          DateTime         @default(now()) @map("submitted_at")
+  reviewedAt           DateTime?        @map("reviewed_at")
+
+  @@index([orderId, submittedAt])
+  @@index([status, submittedAt])
+  @@map("payment_submissions")
 }
 
 model InventoryMovement {
-  id        String   @id @default(cuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  orderId   String?
-  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  actorId   String?
-  type      InventoryMovementType
-  quantity  Int
-  reason    String
-  createdAt DateTime @default(now())
-  @@index([productId, createdAt])
-}
+  id            String                @id @default(cuid())
+  variantId     String                @map("variant_id")
+  variant       ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  orderId       String?               @map("order_id")
+  order         Order?                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  batchId       String?               @map("batch_id")
+  batch         Batch?                @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  actorId       String?               @map("actor_id")
+  actor         User?                 @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  type          InventoryMovementType
+  onHandDelta   Int                   @default(0) @map("on_hand_delta")
+  reservedDelta Int                   @default(0) @map("reserved_delta")
+  reason        String
+  createdAt     DateTime              @default(now()) @map("created_at")
 
-model AuditLog {
-  id        String   @id @default(cuid())
-  actorId   String?
-  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  action    String
-  entity    String
-  entityId  String
-  metadata  Json     @default("{}")
-  createdAt DateTime @default(now())
-  @@index([entity, entityId, createdAt])
+  @@index([variantId, createdAt])
+  @@index([orderId])
+  @@index([batchId])
+  @@map("inventory_movements")
 }

@@ -9,7 +9,8 @@
     "build": "npm run build --workspace api && npm run build --workspace web",
     "test": "npm test --workspace api",
     "db:migrate": "npm --workspace api run db:migrate",
-    "db:generate": "npm --workspace api run db:generate"
+    "db:generate": "npm --workspace api run db:generate",
+    "db:check": "npm --workspace api run db:check"
   },
   "devDependencies": { "concurrently": "^9.2.1" },
   "engines": { "node": ">=24.11" }

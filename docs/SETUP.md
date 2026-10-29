@@ -1,38 +1,54 @@
 # Local setup
 
-## Requirements
+Requires Node.js 24.11+, npm, Docker Desktop (or PostgreSQL 17).
 
-- Node.js 24.11+ and npm 11 (the checked-in lockfile is authoritative).
-- Docker Desktop with Compose, or PostgreSQL 17.
+1. Copy `.env.example` to `.env` and set a random 32+ character `SESSION_SECRET`.
+2. Run `docker compose up -d --wait`.
+3. Run `npm install`, `npm run db:generate`, `npm run db:migrate`, and `npm run db:check`.
+4. Create an administrator, then start the app with `npm run dev` at http://localhost:5173.
 
-## Start
+## First administrator
 
-1. Copy `.env.example` to `.env` in the repository root.
-2. Replace `SESSION_SECRET` with a random secret of 32+ characters. For example, generate it with a password manager or local cryptographic generator; do not reuse an account password.
-3. Set `PAYMENT_INSTRUCTIONS` only to information approved by the organization's treasurer. The example is not real payment information.
-4. Start PostgreSQL with `docker compose up -d db`.
-5. From the repository root run `npm install`, `npm run db:generate`, and `npm run db:migrate`.
-6. Run `npm run dev`, then visit <http://localhost:5173>.
+From the repository root, set temporary values in PowerShell:
+
+```powershell
+$env:ADMIN_EMAIL = 'your-organization-email@example.com'
+$env:ADMIN_NAME = 'Store Admin'
+$env:ADMIN_PASSWORD = 'replace-with-a-unique-password-of-at-least-12-characters'
+npm --workspace api run admin:bootstrap
+Remove-Item Env:ADMIN_PASSWORD
+```
+
+Use your real email and a unique password. The script refuses to create another admin once one exists. Customer registration cannot choose the admin role. The optional local bootstrap endpoint remains available only when explicitly enabled using `ALLOW_ADMIN_BOOTSTRAP` and `ADMIN_BOOTSTRAP_TOKEN`; it is unavailable in production. Prefer the command above.
+
+## Populate the store
+
+Sign in as admin. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Blank size/color fields become STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
+
+Stock adjustments for continuous products require a reason. Batch stock is received through the batch receipt form. Products are archived and variants/payment methods are disabled rather than deleted.
 
 ## Environment
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string; use a least-privilege application user in production. |
-| `SESSION_SECRET` | Signs session cookies; keep private and rotate with planned session invalidation. |
-| `FRONTEND_ORIGIN` | One exact browser origin allowed by CORS and write-origin checks. |
-| `API_INTERNAL_ORIGIN` | API origin used by the Next.js `/api` rewrite (default `http://localhost:3000`). Set to the API's private reachable URL in deployment. |
-| `API_PORT` | API listen port (default 3000). |
-| `NODE_ENV` | `development`, `test`, or `production`; production cookies require HTTPS. |
-| `PAYMENT_INSTRUCTIONS` | Treasurer-approved manual payment instructions shown to customers. |
-| `ALLOW_ADMIN_BOOTSTRAP`, `ADMIN_BOOTSTRAP_TOKEN` | Local-only optional first-admin endpoint; always unavailable in production. Prefer the controlled database bootstrap procedure in the handover guide for production. |
+- `DATABASE_URL`: PostgreSQL connection string.
+- `SESSION_SECRET`: private session signing secret, minimum 32 characters.
+- `FRONTEND_ORIGIN`: exact browser origin, default http://localhost:5173.
+- `API_INTERNAL_ORIGIN`: Next.js rewrite destination, default http://localhost:3000; provide at build/development startup.
+- `API_PORT`: API port, default 3000.
+- `NODE_ENV`: development, test, or production. Production requires HTTPS cookies.
+- `RECEIPT_STORAGE_DIR`: optional absolute private directory; default is storage/receipts relative to the API working directory. Use persistent storage in deployment.
 
-For a local first administrator, set `ALLOW_ADMIN_BOOTSTRAP=true` and a strong temporary `ADMIN_BOOTSTRAP_TOKEN`, fetch `GET /api/csrf`, then send `POST /api/admin/bootstrap` with that CSRF token, an `x-bootstrap-token`, and name/email/password. It is one-time and disabled after an admin exists. Do not put the token in source control. Customer registration creates only `CUSTOMER` accounts. For a controlled production first-admin bootstrap, set `ADMIN_EMAIL`, `ADMIN_NAME`, and `ADMIN_PASSWORD` only in a secured one-off operator environment, then run `npm run admin:bootstrap`; the script refuses to create an admin if one already exists. Remove the temporary password environment value afterward.
+The previous PAYMENT_INSTRUCTIONS setting is unused. Official payment details now live in Admin > Payments.
 
-## Commands
+## Validation
 
-- `npm run dev`: Next.js and API together (web at `http://localhost:5173`).
-- `npm run build`: API compile then production frontend build.
-- `npm test`: API unit tests.
-- `npm run db:migrate`: apply checked-in migrations; never use schema reset on production.
-- `npm run db:studio`: inspect local database records.
+`npm run build`, `npm test`, and `npm run db:check` run the standard checks. Integration tests require a dedicated empty migrated local database whose name ends in `_test`:
+
+```powershell
+$env:DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/mipa_store_test?schema=public'
+$env:TEST_DATABASE_URL = $env:DATABASE_URL
+npm run db:migrate
+npm --workspace api run test:integration
+Remove-Item Env:DATABASE_URL, Env:TEST_DATABASE_URL
+```
+
+Create that test database first. Integration tests populate it with test accounts/orders; do not point them at your development or production database. Optional browser checks use Python Playwright and the webapp-testing server helper.

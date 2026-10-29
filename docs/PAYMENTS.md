@@ -1,17 +1,14 @@
-# Manual payments
+# Manual payment workflow
 
-## Current workflow
+1. Admin configures official bank transfer or QRIS details in Admin > Payments. Product/QRIS images use HTTPS URLs.
+2. Customer signs in, selects a ready-stock group or one batch, and places an order for campus pickup. The payment deadline is 48 hours after creation.
+3. Customer pays the full order amount and uploads a JPG/PNG receipt (maximum 5 MB). Receipt files are private. Uploading proof does not confirm payment.
+4. Admin opens the proof and compares the merchant/bank account, full amount, payer, transaction date, and reference against the official account statement. Approve using the verified merchant reference, or reject with a reason.
+5. Rejection keeps the order unpaid. The customer may resubmit before the deadline. If the deadline has passed, rejection expires the order and releases its continuous-stock reservation. Pending proof keeps the reservation held until reviewed.
+6. Verified continuous orders move to processing. Admin marks them ready for pickup, then collected. Batch orders become ready only after their production stock is received and allocated; collection then consumes the allocated stock.
 
-1. Checkout stores the server-calculated IDR total, creates a pending order, snapshots product lines, and reserves inventory for 48 hours.
-2. The storefront displays `PAYMENT_INSTRUCTIONS`. Configure only details that the organization has approved; the repository example is placeholder text.
-3. A customer may submit a free-text transaction reference. This creates a `REFERENCE_SUBMITTED` event; it does not upload proof and never changes payment state.
-4. An `ADMIN` or `TREASURER` checks the actual official bank/QRIS merchant account, then confirms or rejects with the order's exact amount/reference. Rejection requires a reason and releases its reserved stock in the same transaction. Refund marking requires a reason and is allowed only from `PAID`.
-5. Only after successful verification does fulfillment move to processing. Staff complete the pickup/shipping lifecycle in the dashboard/API.
+Only ADMIN can review payments. There is no third role, payment gateway, partial-payment support, automated refund, or shipping workflow. Paid orders cannot be cancelled through this initial app. Handle exceptional refund disputes outside the app with an organization-controlled record.
 
-Reconcile order public ID, amount, payer/reference, settlement date, and official account statement. Keep the external statement under the treasurer's organization-controlled access policy. The app records the actor and timestamp but does not connect to or verify a bank.
+SQL enforces one submitted and one verified proof per order and prevents reusing a verified reference for the same payment method. Rejected attempts remain visible and reviewed evidence cannot be edited. Method details are snapshotted, so disabling an account or creating a replacement does not change historical proof records.
 
-Pending orders expire after 48 hours. A worker releases reserved stock once; a customer can cancel before payment. Paid-order cancellation/refund requires external financial reconciliation; the app records a refund state but does not send money or automatically restock refunded items.
-
-## Future gateway
-
-No gateway is integrated. Before choosing one, check current merchant eligibility, fees, settlement and refund terms, supported methods, and organization account requirements from the provider's official documentation. Keep provider transaction IDs separate from order IDs. Implement server-side transaction creation, authenticated webhooks, amount/order validation, idempotency, duplicate/out-of-order delivery handling, sandbox tests, reconciliation, and a documented refund process. Never trust a browser success page or client status.
+Receipts are stored in `api/storage/receipts` by default, or `RECEIPT_STORAGE_DIR`. Back up this directory with PostgreSQL; it is not included in the Docker database volume. Owners and admins may retrieve receipts through authenticated API routes; never expose the directory with a static file server.

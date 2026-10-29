@@ -8,10 +8,12 @@
     "start": "node dist/index.js",
     "test": "npm run build && node --test test/*.test.mjs",
     "db:generate": "prisma generate",
+    "db:check": "tsx src/scripts/check-database.ts",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "admin:bootstrap": "tsx src/scripts/bootstrap-admin.ts"
+    "admin:bootstrap": "tsx src/scripts/bootstrap-admin.ts",
+    "test:integration": "npm run build && node --test test/integration/*.test.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

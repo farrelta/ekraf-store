@@ -1,21 +1,12 @@
-export type RoleName = "CUSTOMER" | "ADMIN" | "TREASURER";
-export type PaymentState = "PENDING" | "PAID" | "REJECTED" | "REFUNDED" | "EXPIRED";
-export type FulfillmentState = "PENDING" | "PROCESSING" | "READY_FOR_PICKUP" | "SHIPPED" | "COMPLETED" | "CANCELLED";
-
+export type RoleName = "CUSTOMER" | "ADMIN";
+export type PaymentState = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+export type FulfillmentState = "PENDING" | "PROCESSING" | "READY_FOR_PICKUP" | "COMPLETED" | "CANCELLED";
 export function canViewOrder(role: RoleName, viewerId: string, ownerId: string): boolean {
-  return role !== "CUSTOMER" || viewerId === ownerId;
+  return role === "ADMIN" || viewerId === ownerId;
 }
-
 export function canTransitionPayment(from: PaymentState, to: PaymentState): boolean {
-  return (from === "PENDING" && (to === "PAID" || to === "REJECTED" || to === "EXPIRED")) ||
-    (from === "PAID" && to === "REFUNDED");
+  return from === "PENDING" && ["PAID", "CANCELLED", "EXPIRED"].includes(to);
 }
-
 export function canTransitionFulfillment(from: FulfillmentState, to: FulfillmentState): boolean {
-  const allowed: Partial<Record<FulfillmentState, FulfillmentState[]>> = {
-    PROCESSING: ["READY_FOR_PICKUP", "SHIPPED"],
-    READY_FOR_PICKUP: ["COMPLETED"],
-    SHIPPED: ["COMPLETED"]
-  };
-  return allowed[from]?.includes(to) ?? false;
+  return (from === "PROCESSING" && to === "READY_FOR_PICKUP") || (from === "READY_FOR_PICKUP" && to === "COMPLETED");
 }
