@@ -219,12 +219,6 @@ export function StoreLayout({
               Shop
             </Link>
             <Link
-              className={pathname.startsWith("/batch-orders") ? "active" : ""}
-              href="/batch-orders"
-            >
-              Batch Order
-            </Link>
-            <Link
               className={pathname === "/about" ? "active" : ""}
               href="/about"
             >
@@ -273,6 +267,7 @@ export function StoreLayout({
         )}
         {children}
       </main>
+      <div className="campus-doodle" aria-hidden="true" />
       <footer className="store-footer">
         <div className="store-container footer-inner">
           <Link className="wordmark" href="/">
@@ -281,7 +276,6 @@ export function StoreLayout({
           <span>Official store of EKRAF BEM MIPA UGM</span>
           <nav>
             <Link href="/">Shop</Link>
-            <Link href="/batch-orders">Batch Order</Link>
             <Link href="/about">About</Link>
           </nav>
           <small>© {new Date().getFullYear()} EKRAF BEM MIPA UGM</small>
@@ -291,7 +285,7 @@ export function StoreLayout({
         <nav className="mobile-tabs" aria-label="Store navigation">
           {[
             ["/", "Shop", "box"],
-            ["/batch-orders", "Batch Order", "orders"],
+            ["/cart", "Cart", "cart"],
             ["/orders", "My Orders", "users"],
           ].map(([href, label, icon]) => (
             <Link

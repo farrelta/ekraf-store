@@ -1,9 +1,5 @@
-import { Suspense } from "react";
-import { ShopPage } from "@/features/store/store-pages";
+import { redirect } from "next/navigation";
+
 export default function Page() {
-  return (
-    <Suspense fallback={<p className="empty">Loading…</p>}>
-      <ShopPage batchOnly />
-    </Suspense>
-  );
+  redirect("/?type=BATCH");
 }

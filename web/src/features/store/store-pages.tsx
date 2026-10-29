@@ -353,7 +353,7 @@ export function ProductPage({
           {p && (
             <>
               <nav className="breadcrumb">
-                <Link href={isBatch ? "/batch-orders" : "/"}>
+                <Link href={isBatch ? "/?type=BATCH" : "/"}>
                   {isBatch ? "Batch Order" : "Shop"}
                 </Link>{" "}
                 / {p.name}

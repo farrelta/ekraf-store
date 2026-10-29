@@ -1,3 +1,18 @@
+.campus-doodle {
+  width: 100%;
+  height: clamp(76px, 8vw, 120px);
+  background-color: transparent;
+  background-image: url('/illustrations/campus-learning-panorama.png');
+  background-size: auto 260%;
+  background-repeat: repeat-x;
+  background-position: center bottom;
+  border-top: 0;
+  opacity: 1;
+  filter: brightness(0) drop-shadow(0 0 .4px rgba(0, 0, 0, .85));
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.store-shell:has(.campus-doodle) .store-footer { margin-top: 0; }
 :root {
   --ivory: #f8f6ef;
   --ink: #202a24;
