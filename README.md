@@ -10,7 +10,7 @@ Next.js storefront and Express API backed by PostgreSQL 17 and Prisma 7. The ini
 4. Create the first admin using [SETUP](docs/SETUP.md), then run `npm run dev` and visit http://localhost:5173.
 5. In Admin, add official payment details, products/variants, and production batches. No products, bank accounts, QR codes, or admin passwords are seeded.
 
-Only `ADMIN` and `CUSTOMER` roles exist. Admins manage the catalog, review receipts, receive batch stock, and coordinate pickup. Customers register through the store.
+Only `ADMIN` and `CUSTOMER` roles exist. Mixed orders support full payment or full merchandise plus a 50% batch deposit, with the balance verified before batch pickup. Admins manage the catalog, review receipts, receive batch stock, and coordinate pickup. Customers register through the store.
 
 See [database structure](docs/DATABASE.md), [drawDB schema](docs/schema.dbml), and [payment workflow](docs/PAYMENTS.md). The migration `20261030000000_minimal_ekraf` is a fresh-start transition that refuses to run if legacy users/products/orders contain data. Historical migration files remain for a reproducible deployment chain.
 

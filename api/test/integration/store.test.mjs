@@ -41,10 +41,11 @@ test('minimal EKRAF store integration', { skip: !target, timeout: 90000 }, async
   const post=async(client,route,data,expected=201)=>{const r=await client.call(route,'POST',data);assert.equal(r.status,expected,JSON.stringify(r.body));return r.body;};
   const image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=','base64');
   let product,batchProduct,method,order,submission;
-  const createOrder=(client,variantId,quantity=1,batchId=null,embroideryName)=>client.call('/orders','POST',{items:[{variantId,quantity,...(embroideryName?{embroideryName}:{})}],batchId,customerName:'Student Buyer',customerPhone:'081234567890'},{'idempotency-key':randomUUID()});
+  const createOrder=(client,variantId,quantity=1,batchId=null,embroideryName)=>client.call('/orders','POST',{items:[{variantId,quantity,batchId,...(embroideryName?{embroideryName}:{})}],customerName:'Student Buyer',customerPhone:'081234567890'},{'idempotency-key':randomUUID()});
   const proof=(client,orderId)=>client.call(`/orders/${orderId}/proof`,'POST',image,{'content-type':'image/png','x-payment-method':method.id});
   await t.test('two roles and admin-only settings',async()=>{
     assert.equal((await alice.call('/admin/products')).status,403);
+    assert.equal((await alice.call('/admin/login','POST',{email:'alice@example.test',password:'test-password-12345'})).status,401);
     assert.equal((await alice.call('/admin/payment-methods','POST',{})).status,403);
     const roles=await pool.query("SELECT unnest(enum_range(NULL::roles))::text AS value");
     assert.deepEqual(roles.rows.map(r=>r.value),['CUSTOMER','ADMIN']);
@@ -81,8 +82,8 @@ test('minimal EKRAF store integration', { skip: !target, timeout: 90000 }, async
     const v=await db.productVariant.findUnique({where:{id:product.variants[0].id}});assert.equal(v.onHand,1);assert.equal(v.reserved,0);
     await assert.rejects(pool.query("UPDATE payment_submissions SET review_reason='changed' WHERE id=$1",[second.body.submission.id]));
     await assert.rejects(pool.query('DELETE FROM inventory_movements WHERE variant_id=$1',[v.id]));
-    await admin.call(`/admin/orders/${order.id}/pickup`,'PATCH',{status:'READY_FOR_PICKUP'});
-    await admin.call(`/admin/orders/${order.id}/pickup`,'PATCH',{status:'COMPLETED'});
+    await admin.call(`/admin/order-items/${order.items[0].id}/pickup`,'PATCH',{status:'READY_FOR_PICKUP'});
+    await admin.call(`/admin/order-items/${order.items[0].id}/pickup`,'PATCH',{status:'COMPLETED'});
     assert.equal((await db.productVariant.findUnique({where:{id:v.id}})).onHand,1);
   });
   await t.test('duplicate verified reference rolls back; timely proof holds expired order',async()=>{
@@ -102,18 +103,46 @@ test('minimal EKRAF store integration', { skip: !target, timeout: 90000 }, async
     const batch=(await post(admin,'/admin/batches',payload)).batch;
     await post(admin,'/admin/batches',{...payload,name:'Batch 02'});
     assert.equal((await createOrder(alice,batchProduct.variants[0].id,1,batch.id)).status,400);
-    const r=await alice.call('/orders','POST',{batchId:batch.id,customerName:'Alice Student',customerPhone:'0812345678',items:[{variantId:batchProduct.variants[0].id,quantity:1,embroideryName:'NADIA'},{variantId:batchProduct.variants[0].id,quantity:1,embroideryName:'NAYA'}]},{'idempotency-key':randomUUID()});
+    const r=await alice.call('/orders','POST',{customerName:'Alice Student',customerPhone:'0812345678',items:[{variantId:batchProduct.variants[0].id,batchId:batch.id,quantity:1,embroideryName:'NADIA'},{variantId:batchProduct.variants[0].id,batchId:batch.id,quantity:1,embroideryName:'NAYA'}]},{'idempotency-key':randomUUID()});
     assert.equal(r.status,201,JSON.stringify(r.body));const id=r.body.order.id;assert.equal(r.body.order.items.length,2);
     assert.equal((await db.productVariant.findUnique({where:{id:batchProduct.variants[0].id}})).reserved,0);
     const s=await proof(alice,id);await post(admin,`/admin/payment-submissions/${s.body.submission.id}/review`,{action:'VERIFIED',reference:'BANK-BATCH-01'},200);
-    assert.equal((await db.order.findUnique({where:{id}})).pickupStatus,'PROCESSING');
+    assert((await db.orderItem.findMany({where:{orderId:id}})).every(i=>i.pickupStatus==='PROCESSING'));
     await admin.call(`/admin/batches/${batch.id}`,'PATCH',{status:'CLOSED'});
     assert.equal((await createOrder(alice,batchProduct.variants[0].id,1,batch.id,'NAME')).status,409);
     await post(admin,`/admin/batches/${batch.id}/receive`,{items:[{variantId:batchProduct.variants[0].id,quantity:2}],reason:'Production delivery'},200);
-    assert.equal((await db.order.findUnique({where:{id}})).pickupStatus,'READY_FOR_PICKUP');
-    await admin.call(`/admin/orders/${id}/pickup`,'PATCH',{status:'COMPLETED'});
+    assert((await db.orderItem.findMany({where:{orderId:id}})).every(i=>i.pickupStatus==='READY_FOR_PICKUP'));
+    for(const item of r.body.order.items)assert.equal((await admin.call(`/admin/order-items/${item.id}/pickup`,'PATCH',{status:'COMPLETED'})).status,200);
     const v=await db.productVariant.findUnique({where:{id:batchProduct.variants[0].id}});assert.equal(v.onHand,0);assert.equal(v.reserved,0);
-    const mixed=await alice.call('/orders','POST',{batchId:batch.id,customerName:'Alice Student',customerPhone:'0812345678',items:[{variantId:product.variants[0].id,quantity:1}]},{'idempotency-key':randomUUID()});assert.notEqual(mixed.status,201);
+    const mixed=await alice.call('/orders','POST',{customerName:'Alice Student',customerPhone:'0812345678',items:[{variantId:product.variants[0].id,batchId:batch.id,quantity:1}]},{'idempotency-key':randomUUID()});assert.notEqual(mixed.status,201);
+  });
+  await t.test('mixed checkout, 50% batch deposit, separate pickup and balance verification',async()=>{
+    const merch=(await post(admin,'/admin/products',{name:'Mixed Tee',sellingType:'CONTINUOUS',status:'PUBLISHED',variants:[{sku:'MIX-TEE',price:'85000',onHand:4}]})).product;
+    const jacket=(await post(admin,'/admin/products',{name:'Mixed Jacket',sellingType:'BATCH',status:'PUBLISHED',variants:[{sku:'MIX-JKT',size:'M',price:'265000'}]})).product;
+    const batch=(await post(admin,'/admin/batches',{productId:jacket.id,name:'Mixed batch',status:'OPEN',opensAt:new Date(Date.now()-1000).toISOString(),closesAt:new Date(Date.now()+86400000).toISOString()})).batch;
+    const r=await alice.call('/orders','POST',{customerName:'Alice Student',customerPhone:'081234567890',paymentPlan:'BATCH_DEPOSIT',items:[{variantId:merch.variants[0].id,quantity:1},{variantId:jacket.variants[0].id,batchId:batch.id,quantity:1,embroideryName:'NADIA'}]},{'idempotency-key':randomUUID()});
+    assert.equal(r.status,201,JSON.stringify(r.body));const o=r.body.order;
+    assert.equal(o.total,'350000.00');assert.equal(o.amountDue,'217500.00');assert.equal(o.initialAmount,'217500.00');
+    assert(Math.abs(new Date(o.expiresAt)-new Date(o.createdAt)-86400000)<1000);
+    const initial=await proof(alice,o.id);assert.equal(initial.status,202);
+    await post(admin,`/admin/payment-submissions/${initial.body.submission.id}/review`,{action:'VERIFIED',reference:'MIX-DP'},200);
+    let current=(await alice.call('/orders')).body.orders.find(x=>x.id===o.id);assert.equal(current.paymentStatus,'PARTIALLY_PAID');assert.equal(current.amountDue,'132500.00');
+    const merchandise=current.items.find(i=>!i.batchId),batchItem=current.items.find(i=>i.batchId);
+    assert.equal((await admin.call(`/admin/order-items/${merchandise.id}/pickup`,'PATCH',{status:'READY_FOR_PICKUP'})).status,200);
+    assert.equal((await admin.call(`/admin/order-items/${merchandise.id}/pickup`,'PATCH',{status:'COMPLETED'})).status,200);
+    await admin.call(`/admin/batches/${batch.id}`,'PATCH',{status:'CLOSED'});
+    await post(admin,`/admin/batches/${batch.id}/receive`,{items:[{variantId:jacket.variants[0].id,quantity:1}],reason:'Jacket delivered'},200);
+    assert.equal((await admin.call(`/admin/order-items/${batchItem.id}/pickup`,'PATCH',{status:'COMPLETED'})).status,409);
+    // Initial deadline does not expire an accepted deposit or block balance payment.
+    await pool.query("UPDATE orders SET created_at=now()-interval '3 days',expires_at=now()-interval '1 second' WHERE id=$1",[o.id]);
+    await expireOrders(db);assert.equal((await db.order.findUnique({where:{id:o.id}})).paymentStatus,'PARTIALLY_PAID');
+    const balance=await proof(alice,o.id);assert.equal(balance.status,202);
+    const record=await db.paymentSubmission.findUnique({where:{id:balance.body.submission.id}});assert.equal(record.phase,'BALANCE');assert.equal(record.amount.toFixed(2),'132500.00');
+    await post(admin,`/admin/payment-submissions/${record.id}/review`,{action:'VERIFIED',reference:'MIX-BALANCE'},200);
+    current=(await alice.call('/orders')).body.orders.find(x=>x.id===o.id);assert.equal(current.paymentStatus,'PAID');assert.equal(current.paidAmount,'350000.00');assert.equal(current.remainingBalance,'0.00');
+    assert.equal((await db.productVariant.findUnique({where:{id:merch.variants[0].id}})).onHand,3,'Balance approval must not consume merchandise twice');
+    assert.equal((await admin.call(`/admin/order-items/${batchItem.id}/pickup`,'PATCH',{status:'COMPLETED'})).status,200);
+    assert.equal((await db.productVariant.findUnique({where:{id:jacket.variants[0].id}})).onHand,0);
   });
   await t.test('catalog changes preserve order and payment snapshots',async()=>{
     await admin.call(`/admin/products/${product.id}`,'PATCH',{name:'Renamed product',status:'ARCHIVED'});

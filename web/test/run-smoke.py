@@ -13,6 +13,10 @@ root = Path(__file__).resolve().parents[2]
 node = shutil.which('node')
 assert node and os.environ.get('TEST_DATABASE_URL'), 'Set TEST_DATABASE_URL and install Node first'
 env = {**os.environ, 'DATABASE_URL': os.environ['TEST_DATABASE_URL'], 'API_PORT': '3000', 'FRONTEND_ORIGIN': 'http://localhost:5187', 'RECEIPT_STORAGE_DIR': 'storage/integration-receipts', 'TEST_BASE_URL': 'http://localhost:5187'}
+admin_path = os.environ.get('ADMIN_PANEL_PATH')
+if not admin_path:
+    admin_path = next(line.split('=', 1)[1].strip().strip("\"'") for line in (root / '.env').read_text().splitlines() if line.startswith('ADMIN_PANEL_PATH='))
+env['ADMIN_PANEL_PATH'] = admin_path
 flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 processes = []
 logs = []

@@ -1,14 +1,26 @@
-# Manual payment workflow
+# Manual payments and deposits
 
-1. Admin configures official bank transfer or QRIS details in Admin > Payments. Product/QRIS images use HTTPS URLs.
-2. Customer signs in, selects a ready-stock group or one batch, and places an order for campus pickup. The payment deadline is 48 hours after creation.
-3. Customer pays the full order amount and uploads a JPG/PNG receipt (maximum 5 MB). Receipt files are private. Uploading proof does not confirm payment.
-4. Admin opens the proof and compares the merchant/bank account, full amount, payer, transaction date, and reference against the official account statement. Approve using the verified merchant reference, or reject with a reason.
-5. Rejection keeps the order unpaid. The customer may resubmit before the deadline. If the deadline has passed, rejection expires the order and releases its continuous-stock reservation. Pending proof keeps the reservation held until reviewed.
-6. Verified continuous orders move to processing. Admin marks them ready for pickup, then collected. Batch orders become ready only after their production stock is received and allocated; collection then consumes the allocated stock.
+An order can contain merchandise and items from multiple production batches. All collections are campus pickup. Each order item retains its product/variant description, price, batch reference, embroidery name where applicable, and independent pickup state.
 
-Only ADMIN can review payments. There is no third role, payment gateway, partial-payment support, automated refund, or shipping workflow. Paid orders cannot be cancelled through this initial app. Handle exceptional refund disputes outside the app with an organization-controlled record.
+## Payment options
 
-SQL enforces one submitted and one verified proof per order and prevents reusing a verified reference for the same payment method. Rejected attempts remain visible and reviewed evidence cannot be edited. Method details are snapshotted, so disabling an account or creating a replacement does not change historical proof records.
+- FULL: pay the entire order initially.
+- BATCH_DEPOSIT: pay all merchandise plus 50% of the batch subtotal initially. The remainder is due before collecting batch items. A deposit cannot be selected for merchandise-only orders.
 
-Receipts are stored in `api/storage/receipts` by default, or `RECEIPT_STORAGE_DIR`. Back up this directory with PostgreSQL; it is not included in the Docker database volume. Owners and admins may retrieve receipts through authenticated API routes; never expose the directory with a static file server.
+Example: Rp85,000 tee + Rp265,000 jacket = Rp350,000 total. Initial deposit checkout requires Rp217,500; the remaining balance is Rp132,500. The server calculates and snapshots the initial requirement using Decimal arithmetic, rounding to two decimal places. No bundle discount is implemented yet.
+
+Initial payment proof must be submitted within 24 hours of checkout. Timely proof holds the reservation while awaiting review. Once the initial deposit is verified, the order becomes PARTIALLY_PAID and is not expired by that original deadline. Balance can be paid after deposit verification and must be verified before batch collection. Rejecting balance evidence preserves the accepted deposit and allows resubmission.
+
+## Manual verification
+
+Admins configure official bank/QRIS details in the private admin panel. Customers upload a private JPG/PNG receipt of at most 5 MB for the currently required installment. Each submission snapshots its amount, phase (INITIAL or BALANCE), and payment destination. Admins must check the real account statement, actual installment amount, payer, date and transaction reference before approval. Rejection requires a reason.
+
+SQL allows one pending submission per order and one verified submission per order/phase. Verified merchant references cannot be reused for the same payment method. Reviewed evidence is immutable. Approval updates payment state and inventory atomically; balance approval never consumes merchandise again.
+
+## Separate pickups
+
+After initial payment verification, merchandise can move through PROCESSING, READY_FOR_PICKUP and COMPLETED independently. Batch production receipts are allocated to deposit-paid or fully paid items and can mark individual items ready. Batch items cannot be marked collected until the entire remaining order balance is verified. Each item records its own pickup status, so a mixed order may have collected merchandise and a jacket still in production.
+
+The app provides no shipping, reviews, arbitrary customization fields, automatic refunds or separate How to buy page. Paid/deposit-paid cancellation and exceptional refund disputes require an organization-controlled manual process outside this initial implementation.
+
+Private receipt files live in api/storage/receipts or RECEIPT_STORAGE_DIR. Back up that directory alongside PostgreSQL. A hidden admin URL is a navigation measure; authenticated ADMIN authorization remains mandatory on every privileged API.

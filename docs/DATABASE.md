@@ -1,46 +1,31 @@
 # Database
 
-The app has nine Prisma models mapped to snake_case tables: `users`, `products`, `product_variants`, `batches`, `orders`, `order_items`, `payment_methods`, `payment_submissions`, and `inventory_movements`. Express also uses the infrastructure `session` table; Prisma maintains `_prisma_migrations`. The importable diagram is `docs/schema.dbml`.
+Nine application tables remain: users, products, product_variants, batches, orders, order_items, payment_methods, payment_submissions, inventory_movements. Express session and Prisma migration infrastructure tables are additional. The diagram is docs/schema.dbml.
 
-## Roles and catalog
+Products use CONTINUOUS or BATCH selling type and DRAFT/PUBLISHED/ARCHIVED publication status. Each product has at least one size/color variant with unique SKU and product/size/color combination. STANDARD represents a missing option. Batch products require preset sizes and store one integer production estimate in weeks. Accounts have only ADMIN and CUSTOMER roles.
 
-Roles are `ADMIN` and `CUSTOMER`; self-registration always creates a customer. Every privileged request reloads the account role from PostgreSQL. An admin reviews payment proofs as well as managing products, variants, batches, and pickup.
+## Mixed checkout
 
-A product is either `CONTINUOUS` or `BATCH`, with `DRAFT`, `PUBLISHED`, or `ARCHIVED` publication status. Products are created with at least one variant. Size/color are normalized to uppercase; STANDARD represents an option that is not offered. Batch products require preset sizes and start with zero ready stock. Prices and inventory exist only on variants. SKU and product/size/color combinations are unique. There are no separate categories/options/reviews/gallery/audit tables.
+An order can contain merchandise and several batches. batch_id and pickup_status belong to order_items. Each batch item must reference a matching product batch that is open at checkout and must have an embroidery name. Merchandise has neither batch nor embroidery. Historical item descriptions and unit prices are snapshotted; total is derived in IDR.
 
-## Orders and inventory
+orders.payment_plan is FULL or BATCH_DEPOSIT. initial_amount snapshots the server-calculated initial payment: total, or full merchandise plus half the batch subtotal rounded to two decimals. The balance is total minus verified payments. payment_submissions.phase distinguishes INITIAL and BALANCE. Payment status is PENDING, PARTIALLY_PAID, PAID, EXPIRED, or CANCELLED.
 
-Orders contain continuous items or items from one production batch. The storefront splits mixed bags into separately payable orders. A batch item requires an embroidery name; different names remain separate order lines. Item descriptions and prices are immutable snapshots through the API. Total is calculated using Decimal arithmetic, in IDR. Campus pickup is the only fulfillment method.
+Initial checkout expires after 24 hours unless timely proof is under review. Verified deposits are retained and the original deadline does not expire the balance. Balance payment must be verified before batch pickup. One SUBMITTED proof is allowed per order and one VERIFIED proof per phase. Reviewed evidence and stock history are protected by SQL triggers.
 
-Continuous checkout increments reserved quantity, using serializable transactions with bounded retries. Availability is on-hand minus reserved. Cancellation or expiry releases reservations exactly once. Approval consumes continuous reservations and physical stock; pickup must not consume them again.
+## Inventory and collection
 
-Batch checkout and payment do not consume ready stock. Admins close the batch, receive production quantities, and the API allocates stock to its paid orders in creation order. Only fully allocated orders become ready for pickup. Ledger entries tag receipts/reservations with their batch, preventing another batch from spending those receipts. Collection consumes the batch reservation and physical stock.
+Continuous checkout reserves merchandise; initial approval consumes those reservations. Cancellation/expiry of an unpaid initial checkout releases them exactly once. Balance approval does not touch merchandise stock again. Serializability and bounded retries prevent conflicting stock and payment operations.
 
-Every inventory change appends a movement in the same transaction as its balance update. SQL rejects ledger updates/deletes, negative stock, invalid reservations, nonpositive prices/quantities, invalid batch dates, and zero-change movements. Referenced records cannot be deleted.
+Batch checkout does not consume ready stock. Production receipts tag batch and variant. Allocation reserves received units for individual paid/deposit-paid lines, marking each allocated line ready. Orders from another batch cannot spend those receipts. Batch collection requires the remaining balance verified, consumes the item reservation, and marks that item completed. Merchandise may be collected while batch items are still processing.
 
-## Payments and expiry
+Inventory movements reference order_item_id for new line-specific changes. Historical entries may have a null item reference. On-hand and reservation counters reconcile to appended ledger deltas. SQL checks reject invalid balances, quantities, prices, batch windows, review evidence and duplicate verified references. Reference deletion is restricted.
 
-Orders have a 48-hour deadline. Timely submitted proof holds the order and stock while awaiting review. Rejection permits a new submission before the original deadline; rejection after it expires the order and releases ready-stock reservations. The worker checks overdue unpaid orders every minute and skips submitted proofs. It coordinates through serializable transactions and runs only while the API is running.
+## Migrations
 
-Each submission snapshots the selected bank/QRIS details. Actual payment must be verified by an admin against the official account. Partial unique indexes allow at most one pending and one verified submission per order and prevent reuse of a verified transaction reference for the same payment method. Reviewed evidence is immutable through SQL triggers. Receipts are stored outside the public web directory and are served only to their owner or an admin.
+The historical baseline and Flowstep migrations remain. The earlier minimal schema migration is a fresh-start conversion and refuses populated legacy data; the new 20261031000000_mixed_checkout_deposits migration preserves current orders by copying their batch references and pickup progress to items before removing order-level fields. Existing orders retain FULL payment plans and their full historical amount as initial_amount. It updates the verified-payment uniqueness rule by installment phase.
 
-## Migrations and fresh local reset
+Run npm run db:generate, npm run db:migrate, and npm run db:check. The read-only checker verifies table/migration availability, product/batch links, embroidery, stock-ledger reconciliation, role validity and payment totals. Back up the database before migrations and rehearse on an isolated database.
 
-Migration history is retained: the original baseline, the earlier additive Flowstep migration, and the new `20261030000000_minimal_ekraf` forward migration. The last migration deliberately rebuilds empty legacy application tables and refuses populated legacy users/products/orders. It preserves session storage. This is intended for the authorized local fresh start, not migration of a populated production database.
+A deliberate local reset still uses docker compose -p mipa-store down --volumes, followed by docker compose -p mipa-store up -d --wait and npm run db:migrate. This discards project data and should only be used when explicitly intended. Receipt storage is outside the Docker volume.
 
-Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:check`. The checker is read-only and reconciles variant balances against the stock ledger, verifies product/batch relationships, and checks payment consistency.
-
-To deliberately discard this project's local database again:
-
-```powershell
-docker compose -p mipa-store down --volumes
-docker compose -p mipa-store up -d --wait
-npm run db:migrate
-npm run db:generate
-```
-
-This removes all users, products, orders, and payments in the project volume. It does not remove Docker Desktop or other projects' resources. Receipt files are outside the database volume and require separate retention/cleanup decisions.
-
-## Backup
-
-Back up both PostgreSQL and the private receipt directory to restricted storage outside the app host. Restore them together to a separate environment and verify item snapshots, payment history, receipt access, and inventory reconciliation. Configure scheduled backups and record a restore exercise before production rollout. No remote backup service is configured by this repository.
+Back up both PostgreSQL and the private receipt directory to restricted storage outside the app host. Restore them together to a separate environment and verify payment evidence, item pickup states and ledger reconciliation. No remote backup infrastructure is configured by the repository.

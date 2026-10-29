@@ -7,7 +7,10 @@ test("customers see only their own orders and admins can review all orders", () 
   assert.equal(canViewOrder("ADMIN", "admin", "a"), true);
   assert.equal(canViewOrder("TREASURER", "other", "a"), false);
 });
-test("only pending payments can be paid, cancelled, or expired", () => {
+test("payment transitions support deposits and reject terminal changes", () => {
+  assert.equal(canTransitionPayment("PENDING","PARTIALLY_PAID"),true);
+  assert.equal(canTransitionPayment("PARTIALLY_PAID","PAID"),true);
+  assert.equal(canTransitionPayment("PARTIALLY_PAID","EXPIRED"),false);
   for (const to of ["PAID","CANCELLED","EXPIRED"]) assert.equal(canTransitionPayment("PENDING",to),true);
   for (const from of ["PAID","CANCELLED","EXPIRED"]) assert.equal(canTransitionPayment(from,"PAID"),false);
   assert.equal(canTransitionPayment("PAID","REFUNDED"),false);

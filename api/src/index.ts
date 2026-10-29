@@ -99,6 +99,14 @@ app.post("/api/auth/login", authLimiter, asyncRoute(async (req, res) => {
   req.session.userId = user.id; req.session.role = user.role;
   res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
 }));
+app.post("/api/admin/login", authLimiter, asyncRoute(async (req, res) => {
+  const input = parse(z.object({ email: z.string().email().transform(v => v.toLowerCase()), password: z.string().min(1).max(128) }), req.body);
+  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  if (!user || user.role !== "ADMIN" || !(await argon2.verify(user.passwordHash, input.password))) return res.status(401).json({ error: "Invalid email or password" });
+  await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
+  req.session.userId = user.id; req.session.role = user.role;
+  res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+}));
 app.post("/api/auth/logout", requireUser, asyncRoute(async (req, res) => {
   await new Promise<void>((resolve, reject) => req.session.destroy(err => err ? reject(err) : resolve()));
   res.clearCookie("mipa.sid"); res.status(204).end();

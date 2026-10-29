@@ -23,7 +23,7 @@ Use your real email and a unique password. The script refuses to create another 
 
 ## Populate the store
 
-Sign in as admin. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Blank size/color fields become STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
+Open the private admin URL described below and sign in there. In Admin > Payments, enter official bank or QRIS details. In Products, create a product and its first variant. Blank size/color fields become STANDARD. Add more sizes/colors using Add another variant. Only published products appear publicly. Batch products require preset sizes and zero initial stock. In Batches, create and open a production window. All dates entered in the UI use the operator's local timezone.
 
 Stock adjustments for continuous products require a reason. Batch stock is received through the batch receipt form. Products are archived and variants/payment methods are disabled rather than deleted.
 
@@ -52,3 +52,11 @@ Remove-Item Env:DATABASE_URL, Env:TEST_DATABASE_URL
 ```
 
 Create that test database first. Integration tests populate it with test accounts/orders; do not point them at your development or production database. Optional browser checks use Python Playwright and the webapp-testing server helper.
+
+## Private admin panel
+
+ADMIN_PANEL_PATH is a server-only URL segment in the root .env file. Open http://localhost:5173/<ADMIN_PANEL_PATH> and use the dedicated admin login. The local path was generated randomly during setup. Use a 16–100 character segment of letters, digits, hyphens or underscores; an absent/invalid setting or any other path returns 404. Never prefix this setting with NEXT_PUBLIC_. Next.js loads the shared root .env on server startup. In deployment provide the same setting to the Next.js server and restart after changing it.
+
+There is no admin link in the public store. The private URL still requires ADMIN credentials; customers cannot use the admin login or APIs. Create the first admin with the existing bootstrap command.
+
+Mixed checkout accepts several batches in one order. FULL pays all items initially; BATCH_DEPOSIT pays all merchandise plus half the batch subtotal. Initial payment is due within 24 hours; a verified deposit preserves the order until its balance is paid before batch collection. Merchandise and batch items have independent pickup controls.

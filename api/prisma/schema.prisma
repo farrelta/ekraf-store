@@ -43,6 +43,7 @@ enum BatchStatus {
 
 enum PaymentStatus {
   PENDING
+  PARTIALLY_PAID
   PAID
   EXPIRED
   CANCELLED
@@ -84,6 +85,20 @@ enum InventoryMovementType {
   ADJUSTMENT
 
   @@map("inventory_movement_types")
+}
+
+enum PaymentPlan {
+  FULL
+  BATCH_DEPOSIT
+
+  @@map("payment_plans")
+}
+
+enum PaymentPhase {
+  INITIAL
+  BALANCE
+
+  @@map("payment_phases")
 }
 
 model User {
@@ -147,7 +162,7 @@ model Batch {
   productionWeeks Int                 @default(4) @map("production_weeks")
   announcement    String              @default("")
   createdAt       DateTime            @default(now()) @map("created_at")
-  orders          Order[]
+  items           OrderItem[]
   movements       InventoryMovement[]
 
   @@unique([productId, name])
@@ -159,13 +174,12 @@ model Order {
   id                 String              @id @default(cuid())
   userId             String              @map("user_id")
   user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  batchId            String?             @map("batch_id")
-  batch              Batch?              @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  paymentPlan        PaymentPlan         @default(FULL) @map("payment_plan")
+  initialAmount      Decimal             @map("initial_amount") @db.Decimal(12, 2)
   idempotencyKey     String              @unique @map("idempotency_key")
   customerName       String              @map("customer_name")
   customerPhone      String              @map("customer_phone")
   paymentStatus      PaymentStatus       @default(PENDING) @map("payment_status")
-  pickupStatus       PickupStatus        @default(PENDING) @map("pickup_status")
   expiresAt          DateTime            @map("expires_at")
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
@@ -174,22 +188,26 @@ model Order {
   movements          InventoryMovement[]
 
   @@index([userId, createdAt])
-  @@index([batchId])
   @@index([paymentStatus, expiresAt])
   @@map("orders")
 }
 
 model OrderItem {
-  id              String         @id @default(cuid())
-  orderId         String         @map("order_id")
-  order           Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  variantId       String         @map("variant_id")
-  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
-  itemDescription String         @map("item_description")
-  unitPrice       Decimal        @map("unit_price") @db.Decimal(12, 2)
+  batchId         String?             @map("batch_id")
+  batch           Batch?              @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  pickupStatus    PickupStatus        @default(PENDING) @map("pickup_status")
+  movements       InventoryMovement[]
+  id              String              @id @default(cuid())
+  orderId         String              @map("order_id")
+  order           Order               @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  variantId       String              @map("variant_id")
+  variant         ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  itemDescription String              @map("item_description")
+  unitPrice       Decimal             @map("unit_price") @db.Decimal(12, 2)
   quantity        Int
-  embroideryName  String?        @map("embroidery_name")
+  embroideryName  String?             @map("embroidery_name")
 
+  @@index([batchId, pickupStatus])
   @@index([orderId])
   @@index([variantId])
   @@map("order_items")
@@ -211,6 +229,7 @@ model PaymentMethod {
 }
 
 model PaymentSubmission {
+  phase                PaymentPhase     @default(INITIAL)
   id                   String           @id @default(cuid())
   orderId              String           @map("order_id")
   order                Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
@@ -233,6 +252,8 @@ model PaymentSubmission {
 }
 
 model InventoryMovement {
+  orderItemId   String?               @map("order_item_id")
+  orderItem     OrderItem?            @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   id            String                @id @default(cuid())
   variantId     String                @map("variant_id")
   variant       ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Restrict)
@@ -248,6 +269,7 @@ model InventoryMovement {
   reason        String
   createdAt     DateTime              @default(now()) @map("created_at")
 
+  @@index([orderItemId])
   @@index([variantId, createdAt])
   @@index([orderId])
   @@index([batchId])

@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import dynamic from "next/dynamic";
 import { OrderCard } from "./order-card";
 import { type Api, type Order, type PaymentMethod, type Product, type User, money, date } from "./types";
 
-const AdminPanel = dynamic(() => import("./admin-panel").then(m => m.AdminPanel), { loading: () => <p>Loading admin workspace…</p> });
 type CartLine = { id: string; variantId: string; batchId: string | null; embroideryName?: string; quantity: number };
-const CART_KEY = "ekraf:cart:v2";
-const KEYS_KEY = "ekraf:checkout:v2";
+const CART_KEY = "ekraf:cart:v3";
+const KEYS_KEY = "ekraf:checkout:v3";
 function ProductCard({ product: p, add }: { product: Product; add: (line: Omit<CartLine, "id">) => void }) {
   const [variantId, setVariantId] = useState("");
   const [batchId, setBatchId] = useState("");
@@ -44,6 +42,7 @@ export default function Storefront() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [isLogin, setIsLogin] = useState(true);
+  const [paymentPlan, setPaymentPlan] = useState("FULL");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const report = useCallback((message: string) => setNotice(message), []);
@@ -81,12 +80,12 @@ export default function Storefront() {
   useEffect(() => { if (ready) try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch { /* Bag remains usable if storage is unavailable. */ } }, [cart, keys, ready]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 5000); return () => clearTimeout(timer); }, [notice]);
   const variants = products.flatMap(p => p.variants.map(v => ({ ...v, product: p })));
-  const groups = [...new Set(cart.map(line => line.batchId || "continuous"))];
+  const groups = cart.length ? ["checkout"] : [];
   function clearKey(group: string) { setKeys(old => { const next = { ...old }; delete next[group]; return next; }); }
   function add(line: Omit<CartLine,"id">) {
     if (busy) return;
-    clearKey(line.batchId || "continuous");
-    setCart(old => [...old, { ...line, id: crypto.randomUUID() }]); report("Added to bag. Each batch and ready-stock group has its own checkout.");
+    clearKey("checkout");
+    setCart(old => [...old, { ...line, id: crypto.randomUUID() }]); report("Added to bag. Merchandise and batch products can share one checkout.");
   }
   async function authenticate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = e.currentTarget; const f = new FormData(form); setBusy(true);
@@ -98,7 +97,7 @@ export default function Storefront() {
   async function checkout(group: string) {
     if (!user) { report("Sign in before placing an order."); return; }
     if (phone.trim().length < 6) { report("Enter your phone number for campus pickup."); return; }
-    const lines = cart.filter(l => (l.batchId || "continuous") === group);
+    const lines = cart;
     if (lines.some(l => !variants.some(v => v.id === l.variantId))) { report("Remove unavailable items before checkout."); return; }
     const key = keys[group] || crypto.randomUUID();
     // Persist before sending so a reload can safely retry an uncertain response.
@@ -106,28 +105,29 @@ export default function Storefront() {
     try { localStorage.setItem(KEYS_KEY, JSON.stringify(nextKeys)); } catch { /* This page still retains the checkout key. */ }
     setBusy(true);
     try {
-      const data = await api("/api/orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ batchId: group === "continuous" ? null : group, customerName: user.name, customerPhone: phone, items: lines.map(({ variantId, quantity, embroideryName }) => ({ variantId, quantity, embroideryName })) }) });
-      setCart(old => old.filter(l => !lines.some(done => done.id === l.id))); clearKey(group); setOrders([data.order]); setView("orders"); await refreshShop(); report(`Order created. Pay ${money(data.order.total)} and upload your receipt in My orders.`);
+      const data = await api("/api/orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ paymentPlan: lines.some(l => l.batchId) ? paymentPlan : "FULL", customerName: user.name, customerPhone: phone, items: lines.map(({ variantId, batchId, quantity, embroideryName }) => ({ variantId, batchId, quantity, embroideryName })) }) });
+      setCart(old => old.filter(l => !lines.some(done => done.id === l.id))); clearKey(group); setOrders([data.order]); setView("orders"); await refreshShop(); report(`Order created. Pay ${money(data.order.amountDue)} and upload your receipt in My orders.`);
     } catch (e) { report((e as Error).message); } finally { setBusy(false); }
   }
-  return <div className="app-shell"><header className="topbar"><a href="#" className="brand" onClick={() => setView("shop")}><span className="brand-mark">E</span><span>EKRAF<small>BEM MIPA UGM</small></span></a><nav><button className={view === "shop" ? "active" : ""} onClick={() => setView("shop")}>Shop</button>{user && <button className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}>My orders</button>}{user?.role === "ADMIN" && <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>Admin</button>}</nav><div className="account">{user ? <><span>{user.name}</span><button className="quiet" onClick={() => void api("/api/auth/logout", { method: "POST" }).then(async () => { setUser(null); setOrders([]); setView("shop"); const c = await api("/api/csrf"); setCsrf(c.token); }).catch(e => report(e.message))}>Sign out</button></> : <a href="#account">Sign in</a>}</div></header>
+  return <div className="app-shell"><header className="topbar"><a href="#" className="brand" onClick={() => setView("shop")}><span className="brand-mark">E</span><span>EKRAF<small>BEM MIPA UGM</small></span></a><nav><button className={view === "shop" ? "active" : ""} onClick={() => setView("shop")}>Shop</button>{user && <button className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}>My orders</button>}</nav><div className="account">{user ? <><span>{user.name}</span><button className="quiet" onClick={() => void api("/api/auth/logout", { method: "POST" }).then(async () => { setUser(null); setOrders([]); setView("shop"); const c = await api("/api/csrf"); setCsrf(c.token); }).catch(e => report(e.message))}>Sign out</button></> : <a href="#account">Sign in</a>}</div></header>
     <main>{notice && <div className="notice" role="status" aria-live="polite"><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div>}
       {view === "shop" && <>
         <section className="hero"><div><p className="eyebrow">EKRAF BEM MIPA UGM · OFFICIAL STORE</p><h1>Made for<br/><em>campus life.</em></h1><p>Everyday merchandise and faculty batch pieces. Made by MIPA students, for MIPA students.</p><a href="#catalog" className="hero-link">Shop the collection ↓</a></div><div className="hero-art"><div className="sun"/><div className="art-card card-a"><span>E</span><b>campus<br/>essentials</b></div><div className="art-card card-b"><span>M</span><b>made<br/>for MIPA</b></div></div></section>
         <section className="catalog" id="catalog"><div className="section-heading"><div><p className="eyebrow">THE COLLECTION</p><h2>Shop the collection</h2></div><label className="search"><input aria-label="Search products" placeholder="Search products" value={search} onChange={e => setSearch(e.target.value)}/></label></div><div className="admin-tabs">{[["ALL","All products"],["CONTINUOUS","Merchandise"],["BATCH","Batch orders"]].map(([key,label]) => <button key={key} className={filter === key ? "button-primary" : "button-secondary"} onClick={() => setFilter(key)}>{label}</button>)}</div><div className="product-grid">{products.filter(p => (filter === "ALL" || p.sellingType === filter) && p.name.toLowerCase().includes(search.toLowerCase())).map(p => <ProductCard key={p.id} product={p} add={add}/>)}</div>{!products.length && <p className="empty">The collection is being prepared. Check back soon.</p>}</section>
-        <section className="checkout-area" id="account"><div><p className="eyebrow">YOUR BAG</p><h2>Ready when you are.</h2><p>Campus pickup · QRIS or bank transfer · manual payment verification. Place separate orders for ready-stock items and each production batch.</p></div><div className="checkout-card">
+        <section className="checkout-area" id="account"><div><p className="eyebrow">YOUR BAG</p><h2>Ready when you are.</h2><p>Campus pickup · QRIS or bank transfer · manual payment verification. One checkout for merchandise and batch items. Pay within 24 hours; collect ready merchandise separately.</p></div><div className="checkout-card">
           {!user && <form className="auth-form" onSubmit={authenticate}><div className="form-head"><h3>{isLogin ? "Sign in" : "Create an account"}</h3><button type="button" className="link-button" onClick={() => setIsLogin(!isLogin)}>{isLogin ? "Create account" : "Sign in"}</button></div>{!isLogin && <label>Name<input name="name" required minLength={2} autoComplete="name"/></label>}<label>Email<input name="email" type="email" required autoComplete="email"/></label><label>Password<input name="password" type="password" required minLength={isLogin ? 1 : 12} autoComplete={isLogin ? "current-password" : "new-password"}/></label><button className="button-primary" disabled={busy || !csrf}>{isLogin ? "Sign in" : "Create account"}</button></form>}
           {user && <label>Phone number for campus pickup<input value={phone} onChange={e => setPhone(e.target.value)} type="tel" autoComplete="tel"/></label>}
           {!cart.length && <p>Your bag is empty.</p>}{groups.map(group => {
-            const lines = cart.filter(l => (l.batchId || "continuous") === group);
-            const title = group === "continuous" ? "Ready-stock order" : products.flatMap(p => p.batches).find(b => b.id === group)?.name || "Batch order";
+            const lines = cart;
+            const title = "Your order";
             const subtotal = lines.reduce((sum,l) => sum + Number(variants.find(v => v.id === l.variantId)?.price || 0) * l.quantity,0);
-            return <section className="bag-group" key={group}><h3>{title}</h3>{lines.map(l => { const v = variants.find(v => v.id === l.variantId); return <div className="summary-row" key={l.id}><span>{v ? `${v.product.name} · ${v.size}/${v.color}` : "Unavailable product"} × {l.quantity}{l.embroideryName && <strong> · {l.embroideryName}</strong>}</span><button className="quiet" disabled={busy} onClick={() => { setCart(old => old.filter(x => x.id !== l.id)); clearKey(group); }}>Remove</button></div>; })}<div className="summary-total"><span>Estimated total</span><b>{money(subtotal)}</b></div><button className="button-primary" disabled={busy || !user || !csrf || phone.trim().length < 6} onClick={() => void checkout(group)}>Place this order</button></section>;
+            const batchSubtotal = lines.filter(l => l.batchId).reduce((sum,l) => sum + Number(variants.find(v => v.id === l.variantId)?.price || 0) * l.quantity,0);
+            const due = paymentPlan === "BATCH_DEPOSIT" && batchSubtotal > 0 ? subtotal - batchSubtotal / 2 : subtotal;
+            return <section className="bag-group" key={group}><h3>{title}</h3>{lines.map(l => { const v = variants.find(v => v.id === l.variantId); return <div className="summary-row" key={l.id}><span>{v ? `${v.product.name} · ${v.size}/${v.color}` : "Unavailable product"} × {l.quantity}{l.embroideryName && <strong> · {l.embroideryName}</strong>}</span><button className="quiet" disabled={busy} onClick={() => { setCart(old => old.filter(x => x.id !== l.id)); clearKey(group); }}>Remove</button></div>; })}<div className="summary-total"><span>Estimated total</span><b>{money(subtotal)}</b></div>{batchSubtotal > 0 && <label>Batch payment option<select value={paymentPlan} disabled={busy} onChange={e => { setPaymentPlan(e.target.value); clearKey(group); }}><option value="FULL">Pay everything in full</option><option value="BATCH_DEPOSIT">Full merchandise + 50% batch DP</option></select></label>}<p>Due within 24 hours: <b>{money(due)}</b>{due < subtotal && <> · Remaining batch balance: {money(subtotal-due)}, due before batch pickup.</>}</p><button className="button-primary" disabled={busy || !user || !csrf || phone.trim().length < 6} onClick={() => void checkout(group)}>Place order</button></section>;
           })}
         </div></section>
       </>}
       {view === "orders" && user && <section className="staff-page"><p className="eyebrow">YOUR ACCOUNT</p><h1>My orders</h1><button className="quiet" onClick={() => void refreshOrders().catch(e => report(e.message))}>Refresh order status</button>{orders.map(o => <OrderCard key={o.id} order={o} api={api} methods={methods} onChange={refreshOrders} report={report}/>)}{!orders.length && <p>No orders yet.</p>}</section>}
-      {view === "admin" && user?.role === "ADMIN" && <AdminPanel api={api} report={report} refreshShop={refreshShop}/>}
     </main><footer><div className="brand">EKRAF<small>BEM MIPA UGM</small></div><p>Made by MIPA, for MIPA.<br/>Campus pickup and manually verified payments.</p></footer>
   </div>;
 }

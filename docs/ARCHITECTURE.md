@@ -9,7 +9,7 @@ Next.js App Router renders the storefront, account orders, and an on-demand admi
 
 There are nine application tables, plus session and migration infrastructure tables. Prisma uses camelCase in TypeScript and snake_case physical table/column mappings. The importable diagram is `docs/schema.dbml`.
 
-Only CUSTOMER and ADMIN exist. Every privileged request reloads the role from the database. Registration always creates a customer. Admins manage products/batches/payment methods and verify payments. Owners can access their orders and private receipt images.
+Only CUSTOMER and ADMIN exist. Every privileged request reloads the role from the database. Registration always creates a customer. Admins manage products/batches/payment methods and verify payments. Owners can access their orders and private receipt images. Admins sign in through a dedicated, server-configured private panel URL; the public store has no admin navigation.
 
 The browser never chooses prices, totals, stock changes, reviewers or payment decisions. Checkout uses UUID idempotency keys; concurrent stock changes run in serializable transactions with bounded retries. Stock history is append-only. Approved/rejected payment evidence is immutable. One-minute expiry skips receipts awaiting review. Batch receipts are allocated separately by production window.
 
