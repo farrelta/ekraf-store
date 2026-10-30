@@ -13,6 +13,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { registerStoreRoutes } from "./store-routes.js";
+import { allowedOrigins } from "./origin-policy.js";
 
 const config = z.object({
   DATABASE_URL: z.string().min(1),
@@ -38,7 +39,8 @@ const asyncRoute = (fn: (req: AuthedRequest, res: express.Response) => Promise<u
 app.set("trust proxy", config.NODE_ENV === "production" ? 1 : false);
 app.use(helmet());
 app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
-app.use(cors({ origin: config.FRONTEND_ORIGIN, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] }));
+const origins = allowedOrigins(config.FRONTEND_ORIGIN, config.NODE_ENV);
+app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.has(origin)), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] }));
 app.use(express.json({ limit: "64kb" }));
 app.use(session({
   store: new PgStore({ pool, createTableIfMissing: false }),
@@ -75,7 +77,7 @@ app.get("/api/csrf", (req, res) => {
 app.use("/api", (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
   const origin = req.get("origin");
-  if (origin && origin !== config.FRONTEND_ORIGIN) return res.status(403).json({ error: "Invalid origin" });
+  if (origin && !origins.has(origin)) return res.status(403).json({ error: "Invalid origin" });
   const supplied = req.get("x-csrf-token") ?? "";
   const expected = req.session.csrfToken ?? "";
   const a = Buffer.from(supplied); const b = Buffer.from(expected);

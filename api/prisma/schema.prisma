@@ -141,6 +141,7 @@ model ProductVariant {
   sku       String              @unique
   size      String              @default("STANDARD")
   color     String              @default("STANDARD")
+  type      String              @default("STANDARD")
   price     Decimal             @db.Decimal(12, 2)
   onHand    Int                 @default(0) @map("on_hand")
   reserved  Int                 @default(0)
@@ -148,7 +149,7 @@ model ProductVariant {
   items     OrderItem[]
   movements InventoryMovement[]
 
-  @@unique([productId, size, color])
+  @@unique([productId, size, color, type])
   @@map("product_variants")
 }
 

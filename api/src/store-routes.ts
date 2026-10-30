@@ -14,7 +14,7 @@ const param = (req: Request, name: string) => String(req.params[name] ?? "");
 const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
 const image = z.string().url().max(2048).refine(v => v.startsWith("https://"), "Use an HTTPS image URL").nullable().optional();
-const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
+const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, type: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
 const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false) });
 const productInclude = { variants: { orderBy: { sku: "asc" as const } }, batches: { orderBy: { closesAt: "desc" as const } } };
 const receiptDirectory = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
@@ -89,8 +89,16 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     res.status(204).end();
   }));
   app.patch("/api/admin/variants/:id", admin, route(async (req, res) => {
-    const data = z.object({ price: money.optional(), active: z.boolean().optional() }).parse(req.body);
-    res.json({ variant: await db.productVariant.update({ where: { id: param(req, "id") }, data: { ...data, ...(data.price ? { price: new Prisma.Decimal(data.price) } : {}) } }) });
+    const data = z.object({ price: money.optional(), active: z.boolean().optional(), size: optionSchema.optional(), color: optionSchema.optional(), type: optionSchema.optional() }).parse(req.body);
+    const variant = await transaction(db, async tx => {
+      const current = await tx.productVariant.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { product: true } });
+      await tx.product.update({ where: { id: current.productId }, data: { updatedAt: new Date() } });
+      const changed = (["size", "color", "type"] as const).some(field => data[field] !== undefined && data[field] !== current[field]);
+      if (changed && await tx.orderItem.count({ where: { variantId: current.id } })) fail("Variants with order history cannot change size, color or type. Add another variant instead.");
+      if (data.size !== undefined && data.size !== current.size && current.product.sellingType === "BATCH" && (data.size === "STANDARD" || !catalogOptions.sizes.includes(data.size))) fail("Batch variants require a preset clothing size", 400);
+      return tx.productVariant.update({ where: { id: current.id }, data: { ...data, ...(data.price ? { price: new Prisma.Decimal(data.price) } : {}) } });
+    });
+    res.json({ variant });
   }));
   app.post("/api/admin/variants/:id/stock", admin, route(async (req, res) => {
     const data = z.object({ onHand: z.number().int().min(0).max(100000), reason: text }).parse(req.body);
@@ -175,7 +183,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
         if (!v.active || v.product.status !== "PUBLISHED") fail("A selected variant is unavailable");
         if (batch ? v.productId !== batch.productId || v.product.sellingType !== "BATCH" : v.product.sellingType !== "CONTINUOUS") fail("Select a valid batch for every batch product, and no batch for merchandise", 400);
         if (batch ? !item.embroideryName || v.size === "STANDARD" : !!item.embroideryName) fail("Batch items require a preset size and embroidery name; continuous items have no embroidery", 400);
-        lines.push({ batchId: batch?.id ?? null, variantId: v.id, quantity: item.quantity, embroideryName: item.embroideryName ?? null, itemDescription: `${v.product.name} · ${v.size} / ${v.color} · ${v.sku}`, unitPrice: v.price });
+        lines.push({ batchId: batch?.id ?? null, variantId: v.id, quantity: item.quantity, embroideryName: item.embroideryName ?? null, itemDescription: `${v.product.name} · ${[v.size,v.color,v.type].filter(x => x !== "STANDARD").join(" / ") || "Standard"} · ${v.sku}`, unitPrice: v.price });
       }
       const continuous = total(lines.filter(i => !i.batchId));
       const batchTotal = total(lines.filter(i => i.batchId));

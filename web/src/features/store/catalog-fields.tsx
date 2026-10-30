@@ -25,7 +25,8 @@ export function VariantInputs({ options, sellingType }: { options: CatalogOption
         {isBatch && <option value="" disabled>Choose a clothing size</option>}
         {options.sizes.filter(value => !isBatch || value !== "STANDARD").map(value => <option key={value} value={value}>{value === "STANDARD" ? "No size" : value}</option>)}
       </select></label>
-      <label>Color<input name="color" type="text" maxLength={160} placeholder="Type one color, e.g. Black; blank if not offered"/></label>
+      <label>Color<input name="color" aria-label="Color" maxLength={160} placeholder="Black; blank if not offered"/></label>
+      <label>Type<input name="type" aria-label="Type" maxLength={160} placeholder="Physics; blank if not offered"/></label>
       <label>Price (IDR)<input name="price" type="number" min="1" step="0.01" required/></label>
       <label>Initial stock (zero for batches)<input name="onHand" type="number" min="0" max={isBatch ? "0" : "100000"} step="1" defaultValue="0" required/></label>
     </div>

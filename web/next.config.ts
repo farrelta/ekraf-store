@@ -7,8 +7,13 @@ if (existsSync(sharedEnv)) process.loadEnvFile(sharedEnv);
 import type { NextConfig } from "next";
 
 const apiOrigin = process.env.API_INTERNAL_ORIGIN ?? "http://localhost:3000";
+const allowedDevOrigins = (process.env.ALLOWED_DEV_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins,
   async rewrites() {
     return [
       {

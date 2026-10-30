@@ -99,12 +99,13 @@ Table product_variants [headercolor: #175e7a] {
   sku text [not null, unique]
   size text [not null, default: 'STANDARD']
   color text [not null, default: 'STANDARD']
+  type text [not null, default: 'STANDARD']
   price decimal(12,2) [not null]
   on_hand integer [not null, default: 0]
   reserved integer [not null, default: 0]
   active boolean [not null, default: true]
   indexes {
-    (product_id, size, color) [unique]
+    (product_id, size, color, type) [unique]
   }
   Note: 'One SKU per size/color combination. Normalize option spelling/case before enforcing uniqueness. STANDARD represents an option that is not offered; batch jackets require a preset size. Available = on_hand - reserved. Enforce price >= 0 and 0 <= reserved <= on_hand. Reserve continuous stock with a conditional availability update in the same transaction as the order and ledger entry. Disable rather than delete referenced variants.'
 }

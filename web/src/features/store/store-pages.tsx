@@ -11,7 +11,7 @@ import {
   money,
   date,
 } from "./types";
-import { jacketPhoto, teePhoto } from "./design-assets";
+import { jacketPhoto, keychainPhoto } from "./design-assets";
 import { OrderCard } from "./order-card";
 
 export function ProductImage({ product }: { product: Product }) {
@@ -144,11 +144,11 @@ export function ShopPage({ batchOnly = false }: { batchOnly?: boolean }) {
               </div>
               <div className="hero-photos">
                 <figure className="hero-tee">
-                  <img src={teePhoto} alt="Black campus T-shirts on hangers" />
-                  <figcaption>Campus essentials</figcaption>
+                  <img src={keychainPhoto} alt="MIPA department mascot keychains" />
+                  <figcaption>MIPA keychains</figcaption>
                 </figure>
                 <figure className="hero-jacket">
-                  <img src={jacketPhoto} alt="Forest green varsity jacket" />
+                  <img src={jacketPhoto} alt="FMIPA UGM faculty jacket, front and back" />
                   <figcaption>Faculty collection</figcaption>
                 </figure>
                 {batch && (
@@ -314,17 +314,12 @@ export function ProductPage({
   const variants = p?.variants.filter((v) => v.active) || [],
     v = variants.find((v) => v.id === selected) || variants[0];
   const isBatch = p?.sellingType === "BATCH";
-  const colors = [...new Set(variants.map((v) => v.color))],
-    sizes = [
-      ...new Set(
-        variants.filter((x) => !v || x.color === v.color).map((v) => v.size),
-      ),
-    ].sort((a, b) => {
-      const sizes = ["STANDARD", "XS", "S", "M", "L", "XL", "XXL", "XXXL"];
-      const rank = (size: string) =>
-        sizes.includes(size) ? sizes.indexOf(size) : sizes.length;
-      return rank(a) - rank(b) || a.localeCompare(b);
-    });
+  const optionFields = ["color", "type", "size"] as const;
+  function chooseOption(field: typeof optionFields[number], value: string) {
+    const candidates = variants.filter(x => x[field] === value);
+    candidates.sort((a,b) => optionFields.reduce((score,key) => score + Number(b[key] === v?.[key]) - Number(a[key] === v?.[key]), 0));
+    if (candidates[0]) setSelected(candidates[0].id);
+  }
   const open =
     batch &&
     batch.status === "OPEN" &&
@@ -406,8 +401,7 @@ export function ProductPage({
                       <>
                         <h3>Review your customization</h3>
                         <p>
-                          Size: {v?.size} · Color:{" "}
-                          {v?.color === "STANDARD" ? "Standard" : v?.color}
+                          {[v?.size,v?.color,v?.type].filter(x => x && x !== "STANDARD").join(" / ") || "Standard"}
                         </p>
                         <p>
                           Embroidery: <strong>{name}</strong> · Quantity:{" "}
@@ -428,68 +422,11 @@ export function ProductPage({
                       </>
                     ) : (
                       <>
-                        {colors.some((c) => c !== "STANDARD") && (
-                          <fieldset>
-                            <legend>Color</legend>
-                            <div className="choice-row">
-                              {colors.map((color) => (
-                                <button
-                                  type="button"
-                                  key={color}
-                                  aria-pressed={v?.color === color}
-                                  className={
-                                    v?.color === color
-                                      ? "choice selected"
-                                      : "choice"
-                                  }
-                                  onClick={() =>
-                                    setSelected(
-                                      variants.find(
-                                        (x) =>
-                                          x.color === color &&
-                                          x.size === v?.size,
-                                      )?.id ||
-                                        variants.find((x) => x.color === color)!
-                                          .id,
-                                    )
-                                  }
-                                >
-                                  {color === "STANDARD" ? "Standard" : color}
-                                </button>
-                              ))}
-                            </div>
-                          </fieldset>
-                        )}
-                        {sizes.some((s) => s !== "STANDARD") && (
-                          <fieldset>
-                            <legend>{isBatch ? "Jacket size" : "Size"}</legend>
-                            <div className="choice-row">
-                              {sizes.map((size) => (
-                                <button
-                                  type="button"
-                                  aria-pressed={v?.size === size}
-                                  className={
-                                    v?.size === size
-                                      ? "size-choice selected"
-                                      : "size-choice"
-                                  }
-                                  key={size}
-                                  onClick={() =>
-                                    setSelected(
-                                      variants.find(
-                                        (x) =>
-                                          x.color === v?.color &&
-                                          x.size === size,
-                                      )!.id,
-                                    )
-                                  }
-                                >
-                                  {size === "STANDARD" ? "One size" : size}
-                                </button>
-                              ))}
-                            </div>
-                          </fieldset>
-                        )}
+                        {optionFields.map(field => {
+                          const values = [...new Set(variants.map(x => x[field]))];
+                          if (values.every(value => value === "STANDARD")) return null;
+                          return <fieldset key={field}><legend>{field === "type" ? "Type" : field === "color" ? "Color" : "Size"}</legend><div className="choice-row">{values.map(value => <button type="button" key={value} aria-pressed={v?.[field] === value} className={v?.[field] === value ? "choice selected" : "choice"} onClick={() => chooseOption(field,value)}>{value === "STANDARD" ? "None" : value}</button>)}</div></fieldset>;
+                        })}
                         {isBatch && (
                           <>
                             <label>
@@ -707,7 +644,7 @@ export function CartPage() {
                         <h3>{v?.product.name || "Unavailable item"}</h3>
                         <p>
                           {v?.size === "STANDARD" ? "" : v?.size}{" "}
-                          {v?.color === "STANDARD" ? "" : v?.color}
+                          {v?.color === "STANDARD" ? "" : v?.color} {v?.type === "STANDARD" ? "" : v?.type}
                         </p>
                         {line.embroideryName && (
                           <p>
@@ -1065,7 +1002,7 @@ export function AboutPage() {
           </div>
           <div className="identity-panel">
             <strong>EKRAF</strong>
-            <span>Creative economy and merchandise unit</span>
+            <span>Creative economy</span>
           </div>
         </section>
         <section>
@@ -1101,16 +1038,16 @@ export function AboutPage() {
             <h2>Get in touch</h2>
             <div className="panel contact-card">
               <a
-                href="https://www.instagram.com/ekrafbem_mipa/"
+                href="https://www.instagram.com/ekrafmipaugm/"
                 target="_blank"
                 rel="noreferrer"
               >
-                <span>Instagram</span>
-                <strong>@ekrafbem_mipa</strong>
+                <span><Icon name="instagram" size={22}/><span className="sr-only">Instagram</span></span>
+                <strong>@ekrafmipaugm</strong>
               </a>
-              <a href="mailto:ekrafbem.mipa@ugm.ac.id">
-                <span>Email</span>
-                <strong>ekrafbem.mipa@ugm.ac.id</strong>
+              <a href="mailto:eknonomikreatifbemmipa@gmail.com">
+                <span><Icon name="email" size={22}/><span className="sr-only">Email</span></span>
+                <strong>eknonomikreatifbemmipa@gmail.com</strong>
               </a>
             </div>
           </div>

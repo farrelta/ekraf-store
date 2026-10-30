@@ -968,6 +968,11 @@
     display: none;
   }
 }
+.hero-tee {
+  width: 38%;
+  height: auto;
+  aspect-ratio: 1836 / 2304;
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;

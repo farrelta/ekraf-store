@@ -1,3 +1,5 @@
-// Hero photographs supplied by the approved Flowstep design.
-export const jacketPhoto = "https://images.unsplash.com/photo-1682354163828-d1d56c380431?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3ODc2NDd8MHwxfHNlYXJjaHwxfHxncmVlbiUyMHZhcnNpdHklMjBqYWNrZXQlMjBjbG90aGluZ3xlbnwxfDF8fHwxNzkzMTY2MzQ4fDA&ixlib=rb-4.1.0&q=80&w=1080";
-export const teePhoto = "https://images.unsplash.com/photo-1696086152513-c74dc1d4b135?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3ODc2NDd8MHwxfHNlYXJjaHwxfHxibGFjayUyMGNvdHRvbiUyMHQtc2hpcnQlMjBmb2xkZWQlMjBjbG90aGluZ3xlbnwxfDJ8fHwxNzkzMTY2MzQ4fDA&ixlib=rb-4.1.0&q=80&w=1080";
+// Hero photographs supplied by EKRAF.
+export const jacketPhoto = "/illustrations/hero-faculty-jacket.png";
+export const keychainPhoto = "/illustrations/hero-keychains.jpg";
+// Retained for existing preview scripts.
+export const teePhoto = keychainPhoto;

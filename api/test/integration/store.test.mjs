@@ -1105,5 +1105,31 @@ test(
       assert.deepEqual(results.map(r=>r.status).sort(),[204,409]);
       assert.equal(await db.productVariant.count({where:{productId:race.id}}),1);
     });
+    await t.test('separate optional type, color and size combinations',async()=>{
+      const p=(await post(admin,'/admin/products',{name:'Physics bag',optionLabel:'Type',sellingType:'CONTINUOUS',status:'PUBLISHED',variants:[{color:'Black',type:'Physics',price:'15000',onHand:2},{color:'Black',type:'Computer Science',price:'15000'}]})).product;
+      assert.equal(p.variants[0].size,'STANDARD');assert.equal(p.optionLabel,undefined);
+      assert.equal((await alice.call('/products/'+p.id)).body.product.variants[0].type,p.variants[0].type);
+      assert.equal((await admin.call('/admin/products/'+p.id+'/variants','POST',{color:' black ',type:' physics ',price:'15000'})).status,409);
+      const blank=(await post(admin,'/admin/products/'+p.id+'/variants',{price:'1000'})).variant;
+      assert.equal(blank.color,'STANDARD');assert.equal(blank.size,'STANDARD');assert.equal(blank.type,'STANDARD');
+      const onlyType=(await post(admin,'/admin/products/'+p.id+'/variants',{type:'Chemistry',price:'1000'})).variant;
+      assert.equal(onlyType.color,'STANDARD');assert.equal(onlyType.type,'CHEMISTRY');
+      const o=await createOrder(alice,p.variants.find(v=>v.type==='PHYSICS').id);assert.equal(o.status,201);assert.match(o.body.order.items[0].itemDescription,/BLACK \/ PHYSICS/);
+    });
+    await t.test('edit unused variant options without changing SKU or stock',async()=>{
+      const p=(await post(admin,'/admin/products',{name:'Editable options',sellingType:'CONTINUOUS',status:'PUBLISHED',variants:[{color:'Black',price:'1000',onHand:3},{color:'White',price:'1000'}]})).product;
+      const v=p.variants.find(x=>x.color==='BLACK'), path='/admin/variants/'+v.id;
+      assert.equal((await alice.call(path,'PATCH',{color:'Red'})).status,403);
+      let r=await admin.call(path,'PATCH',{size:' m ',color:' navy ',type:' physics '});assert.equal(r.status,200);assert.equal(r.body.variant.sku,v.sku);assert.equal(r.body.variant.onHand,3);assert.equal(r.body.variant.size,'M');assert.equal(r.body.variant.type,'PHYSICS');
+      assert.equal((await admin.call(path,'PATCH',{size:'',color:'White',type:''})).status,409);
+      const order=await createOrder(alice,v.id);assert.equal(order.status,201);
+      const before=order.body.order.items[0].itemDescription;
+      assert.equal((await admin.call(path,'PATCH',{color:'Red'})).status,409);
+      assert.equal((await admin.call(path,'PATCH',{size:'M',color:'NAVY',type:'PHYSICS',price:'1200'})).status,200);
+      const loaded=(await admin.call('/admin/products/'+p.id)).body.product;assert.equal(loaded.variants.find(x=>x.id===v.id).hasOrderHistory,true);
+      await alice.call('/orders/'+order.body.order.id+'/cancel','POST');assert.equal((await admin.call(path,'PATCH',{type:'Chemistry'})).status,409);
+      assert.equal((await alice.call('/orders/'+order.body.order.id)).body.order.items[0].itemDescription,before);
+      assert.equal((await admin.call('/admin/variants/'+batchProduct.variants[0].id,'PATCH',{size:''})).status,409);
+    });
   },
 );

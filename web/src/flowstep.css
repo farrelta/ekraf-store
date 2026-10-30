@@ -7,8 +7,8 @@
   background-repeat: repeat-x;
   background-position: center bottom;
   border-top: 0;
-  opacity: 1;
-  filter: brightness(0) drop-shadow(0 0 .4px rgba(0, 0, 0, .85));
+  opacity: .75;
+  filter: brightness(0);
   flex-shrink: 0;
   pointer-events: none;
 }
@@ -1256,13 +1256,25 @@ details p {
   display: none;
 }
 .identity-panel {
-  background: #00c853;
+  background: #426b56;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   border-radius: 8px;
   padding: 54px 32px;
   color: white;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.identity-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: url('/illustrations/ekraf-team.jpeg') center 55% / cover no-repeat;
+  opacity: .5;
+  pointer-events: none;
 }
 .identity-panel strong {
   font-size: 32px;
@@ -1324,3 +1336,6 @@ details p {
   overflow-wrap: anywhere;
   text-align: right;
 }
+
+.hero-tee img { object-fit: contain; object-position: center; background: #f3f2ec; }
+.hero-jacket img { object-fit: contain; background: #303c48; }

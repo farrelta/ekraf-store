@@ -14,6 +14,7 @@ const category = (f: FormData) =>
 const variant = (f: FormData) => ({
   size: get(f, "size") || "STANDARD",
   color: get(f, "color") || "STANDARD",
+  type: get(f, "type") || "STANDARD",
   price: get(f, "price"),
   onHand: Number(get(f, "onHand")),
 });
@@ -229,7 +230,7 @@ export function ProductEditor({ id }: { id?: string }) {
                   <div className="section-title">
                     <h3>
                       {v.size === "STANDARD" ? "No size" : v.size} /{" "}
-                      {v.color === "STANDARD" ? "No color" : v.color}
+                      {v.color === "STANDARD" ? "No color" : v.color} / {v.type === "STANDARD" ? "No type" : v.type}
                     </h3>
                     <Badge value={v.active ? "PUBLISHED" : "ARCHIVED"} />
                   </div>
@@ -247,11 +248,20 @@ export function ProductEditor({ id }: { id?: string }) {
                         {
                           price: get(f, "price"),
                           active: f.get("active") === "on",
+                          ...(v.hasOrderHistory ? {} : { size: get(f,"size"), color: get(f,"color"), type: get(f,"type") }),
                         },
                         "PATCH",
                       )
                     }
                   >
+                    <fieldset disabled={v.hasOrderHistory}>
+                      <p className="muted">{v.hasOrderHistory ? "Size, color and type are locked because this variant has order history." : "Edit options before this variant has orders. SKU and stock stay unchanged."}</p>
+                      <div className="form-grid">
+                        <label>Size<select name="size" aria-label="Size" defaultValue={v.size}>{[...new Set([...options.sizes,v.size])].filter(size => p.sellingType !== "BATCH" || size !== "STANDARD").map(size => <option key={size} value={size}>{size === "STANDARD" ? "No size" : size}</option>)}</select></label>
+                        <label>Color<input name="color" defaultValue={v.color === "STANDARD" ? "" : v.color} maxLength={160}/></label>
+                        <label>Type<input name="type" defaultValue={v.type === "STANDARD" ? "" : v.type} maxLength={160}/></label>
+                      </div>
+                    </fieldset>
                     <div className="form-grid">
                       <Field
                         label="Price (IDR)"

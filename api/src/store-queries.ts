@@ -229,16 +229,12 @@ export function registerQueryRoutes(
   app.get(
     "/api/admin/products/:id",
     admin,
-    route(async (req, res) =>
-      res.json({
-        product: productDto(
-          await db.product.findUniqueOrThrow({
-            where: { id: id(req) },
-            include: productInclude,
-          }),
-        ),
-      }),
-    ),
+    route(async (req,res) => {
+      const p=await db.product.findUniqueOrThrow({where:{id:id(req)},include:productInclude});
+      const referenced=await db.orderItem.groupBy({by:['variantId'],where:{variant:{productId:p.id}}});
+      const ids=new Set(referenced.map(item=>item.variantId));
+      res.json({product:{...productDto(p),variants:p.variants.map(v=>({...v,hasOrderHistory:ids.has(v.id)}))}});
+    }),
   );
 
   const batchList = (isAdmin: boolean) =>
