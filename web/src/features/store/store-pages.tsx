@@ -78,13 +78,11 @@ function ProductTile({ product: p }: { product: Product }) {
     </article>
   );
 }
-export function ShopPage({ batchOnly = false }: { batchOnly?: boolean }) {
+export function ShopPage() {
   const search = useSearchParams(),
     router = useRouter(),
     pathname = usePathname();
-  const params = new URLSearchParams(search.toString());
-  if (batchOnly) params.set("type", "BATCH");
-  const { data, error, loading, reload } = useData("/api/products?" + params);
+  const { data, error, loading, reload } = useData("/api/products?" + search.toString());
   const { data: batchData } = useData("/api/batches?pageSize=1");
   const [dismissed, setDismissed] = useState(false);
   const batch = batchData?.batches[0];
@@ -98,78 +96,74 @@ export function ShopPage({ batchOnly = false }: { batchOnly?: boolean }) {
   return (
     <StoreLayout>
       <div className="store-container">
-        {!batchOnly && (
-          <>
-            {batch && !dismissed && (
-              <aside className="announcement">
-                <small>BATCH ORDER OPEN</small>
-                <div>
-                  <strong>{batch.product.name} — size + name embroidery</strong>
-                  <span>
-                    Order by {date(batch.closesAt)} · {batch.productionWeeks}{" "}
-                    weeks production
-                  </span>
-                </div>
-                <Link href={`/batch-orders/${batch.id}`}>
-                  View batch order →
-                </Link>
-                <button
-                  aria-label="Dismiss announcement"
-                  onClick={() => setDismissed(true)}
-                >
-                  ×
-                </button>
-              </aside>
-            )}
-            <section className="flow-hero">
-              <div className="hero-copy">
-                <small>EKRAF BEM MIPA UGM · OFFICIAL STORE</small>
-                <h1>
-                  Made for
-                  <br />
-                  campus life.
-                </h1>
-                <p>
-                  Everyday merch and limited batch pieces, made by MIPA students
-                  for MIPA students.
-                </p>
-                <div className="button-row">
-                  <a className="button-light" href="#collection">
-                    Shop Now
-                  </a>
-                  <Link className="button-outline-light" href="/about">
-                    About EKRAF →
-                  </Link>
-                </div>
-              </div>
-              <div className="hero-photos">
-                <figure className="hero-tee">
-                  <img src={keychainPhoto} alt="MIPA department mascot keychains" />
-                  <figcaption>MIPA keychains</figcaption>
-                </figure>
-                <figure className="hero-jacket">
-                  <img src={jacketPhoto} alt="FMIPA UGM faculty jacket, front and back" />
-                  <figcaption>Faculty collection</figcaption>
-                </figure>
-                {batch && (
-                  <Link
-                    className="hero-batch"
-                    href={`/batch-orders/${batch.id}`}
-                  >
-                    Batch order open
-                  </Link>
-                )}
-              </div>
-            </section>
-          </>
+        {batch && !dismissed && (
+          <aside className="announcement">
+            <small>BATCH ORDER OPEN</small>
+            <div>
+              <strong>{batch.product.name} — size + name embroidery</strong>
+              <span>
+                Order by {date(batch.closesAt)} · {batch.productionWeeks}{" "}
+                weeks production
+              </span>
+            </div>
+            <Link href={`/batch-orders/${batch.id}`}>
+              View batch order →
+            </Link>
+            <button
+              aria-label="Dismiss announcement"
+              onClick={() => setDismissed(true)}
+            >
+              ×
+            </button>
+          </aside>
         )}
+        <section className="flow-hero">
+          <div className="hero-copy">
+            <small>EKRAF BEM MIPA UGM · OFFICIAL STORE</small>
+            <h1>
+              Made for
+              <br />
+              campus life.
+            </h1>
+            <p>
+              Everyday merch and limited batch pieces, made by MIPA students
+              for MIPA students.
+            </p>
+            <div className="button-row">
+              <a className="button-light" href="#collection">
+                Shop Now
+              </a>
+              <Link className="button-outline-light" href="/about">
+                About EKRAF →
+              </Link>
+            </div>
+          </div>
+          <div className="hero-photos">
+            <figure className="hero-tee">
+              <img src={keychainPhoto} alt="MIPA department mascot keychains" />
+              <figcaption>MIPA keychains</figcaption>
+            </figure>
+            <figure className="hero-jacket">
+              <img src={jacketPhoto} alt="FMIPA UGM faculty jacket, front and back" />
+              <figcaption>Faculty collection</figcaption>
+            </figure>
+            {batch && (
+              <Link
+                className="hero-batch"
+                href={`/batch-orders/${batch.id}`}
+              >
+                Batch order open
+              </Link>
+            )}
+          </div>
+        </section>
         <section id="collection" className="collection">
           <div className="collection-heading">
             <div>
               <small className="eyebrow">
-                {batchOnly ? "MADE TO ORDER" : "COLLECTION"}
+                COLLECTION
               </small>
-              <h1>{batchOnly ? "Batch orders" : "Shop the collection"}</h1>
+              <h1>Shop the collection</h1>
             </div>
             <form
               className="compact-search"
@@ -191,25 +185,23 @@ export function ShopPage({ batchOnly = false }: { batchOnly?: boolean }) {
               <button className="sr-only">Search</button>
             </form>
             <div className="collection-controls">
-              {!batchOnly && (
-                <div className="segmented">
-                  {[
-                    ["", "All products"],
-                    ["CONTINUOUS", "Merchandise"],
-                    ["BATCH", "Batch order"],
-                  ].map(([v, label]) => (
-                    <button
-                      key={v}
-                      className={
-                        (search.get("type") || "") === v ? "active" : ""
-                      }
-                      onClick={() => change("type", v)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="segmented">
+                {[
+                  ["", "All products"],
+                  ["CONTINUOUS", "Merchandise"],
+                  ["BATCH", "Batch order"],
+                ].map(([v, label]) => (
+                  <button
+                    key={v}
+                    className={
+                      (search.get("type") || "") === v ? "active" : ""
+                    }
+                    onClick={() => change("type", v)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <select
                 aria-label="Sort products"
                 value={search.get("sort") || "featured"}
@@ -261,31 +253,29 @@ export function ShopPage({ batchOnly = false }: { batchOnly?: boolean }) {
             />
           </State>
         </section>
-        {!batchOnly && (
-          <section className="buying-steps">
-            <small className="outlined-label">HOW IT WORKS</small>
-            <h2 className="mobile-only">Buy in four simple steps</h2>
-            <div>
-              {[
-                ["Browse", "Pick your everyday merch or batch order piece."],
-                ["Choose", "Select your size, color, and quantity."],
-                [
-                  "Pay",
-                  "Pay in full or choose a 50% batch DP and upload proof.",
-                ],
-                ["Receive", "Track each item and collect it on campus."],
-              ].map(([name, copy], i) => (
-                <article key={name}>
-                  <small>
-                    0{i + 1} {name.toUpperCase()}
-                  </small>
-                  <h3>{name}</h3>
-                  <p>{copy}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="buying-steps">
+          <small className="outlined-label">HOW IT WORKS</small>
+          <h2 className="mobile-only">Buy in four simple steps</h2>
+          <div>
+            {[
+              ["Browse", "Pick your everyday merch or batch order piece."],
+              ["Choose", "Select your size, color, and quantity."],
+              [
+                "Pay",
+                "Pay in full or choose a 50% batch DP and upload proof.",
+              ],
+              ["Receive", "Track each item and collect it on campus."],
+            ].map(([name, copy], i) => (
+              <article key={name}>
+                <small>
+                  0{i + 1} {name.toUpperCase()}
+                </small>
+                <h3>{name}</h3>
+                <p>{copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
       </div>
     </StoreLayout>
   );

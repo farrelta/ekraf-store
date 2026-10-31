@@ -1,11 +1,11 @@
-import dotenv from "dotenv";
+import { existsSync } from "node:fs";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.js";
 import argon2 from "argon2";
 import { z } from "zod";
 
-dotenv.config({ path: "../.env" });
+if (existsSync("../.env")) process.loadEnvFile("../.env");
 const env = z.object({
   DATABASE_URL: z.string().min(1),
   ADMIN_EMAIL: z.string().email().transform(value => value.toLowerCase()),

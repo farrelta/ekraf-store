@@ -1,4 +1,4 @@
-import express, { type Express, type RequestHandler, type Request, type Response } from "express";
+import express, { type Express, type RequestHandler, type Request } from "express";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
@@ -9,7 +9,6 @@ import { canTransitionFulfillment } from "./order-policy.js";
 import { registerQueryRoutes } from "./store-queries.js";
 import { catalogOptions, createWithSkus, optionSchema } from "./catalog.js";
 
-const route = (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler => (req, res, next) => { void fn(req, res).catch(next); };
 const param = (req: Request, name: string) => String(req.params[name] ?? "");
 const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
@@ -24,7 +23,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
   registerQueryRoutes(app, db, auth, admin);
   app.get("/api/admin/catalog-options", admin, (_req, res) => res.json(catalogOptions));
-  app.post("/api/admin/products", admin, route(async (req, res) => {
+  app.post("/api/admin/products", admin, async (req, res) => {
     const { variants, ...data } = productFields.extend({ variants: z.array(variantSchema).min(1).max(100) }).parse(req.body);
     if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || v.size === "STANDARD" || !catalogOptions.sizes.includes(v.size))) fail("Batch products need a preset clothing size and start with zero ready stock", 400);
     const product = await createWithSkus(db, variants, assigned => transaction(db, async tx => {
@@ -36,13 +35,13 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return tx.product.findUniqueOrThrow({ where: { id: created.id }, include: productInclude });
     }));
     res.status(201).json({ product });
-  }));
-  app.patch("/api/admin/products/:id", admin, route(async (req, res) => {
+  });
+  app.patch("/api/admin/products/:id", admin, async (req, res) => {
     const data = productFields.omit({ sellingType: true }).partial().parse(req.body);
     const product = await db.product.update({ where: { id: param(req, "id") }, data, include: productInclude });
     res.json({ product });
-  }));
-  app.delete("/api/admin/products/:id", admin, route(async (req, res) => {
+  });
+  app.delete("/api/admin/products/:id", admin, async (req, res) => {
     await transaction(db, async tx => {
       const productId = param(req, "id");
       const product = await tx.product.findUnique({ where: { id: productId } });
@@ -59,8 +58,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       await tx.product.delete({ where: { id: productId } });
     });
     res.status(204).end();
-  }));
-  app.post("/api/admin/products/:id/variants", admin, route(async (req, res) => {
+  });
+  app.post("/api/admin/products/:id/variants", admin, async (req, res) => {
     const data = variantSchema.parse(req.body);
     const variant = await createWithSkus(db, [data], ([assigned]) => transaction(db, async tx => {
       if (!assigned) throw new Error("Variant assignment missing");
@@ -71,8 +70,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return created;
     }));
     res.status(201).json({ variant });
-  }));
-  app.delete("/api/admin/variants/:id", admin, route(async (req, res) => {
+  });
+  app.delete("/api/admin/variants/:id", admin, async (req, res) => {
     await transaction(db, async tx => {
       const variant = await tx.productVariant.findUnique({ where: { id: param(req, "id") } });
       if (!variant) return fail("Variant not found", 404);
@@ -87,8 +86,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       await tx.productVariant.delete({ where: { id: variant.id } });
     });
     res.status(204).end();
-  }));
-  app.patch("/api/admin/variants/:id", admin, route(async (req, res) => {
+  });
+  app.patch("/api/admin/variants/:id", admin, async (req, res) => {
     const data = z.object({ price: money.optional(), active: z.boolean().optional(), size: optionSchema.optional(), color: optionSchema.optional(), type: optionSchema.optional() }).parse(req.body);
     const variant = await transaction(db, async tx => {
       const current = await tx.productVariant.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { product: true } });
@@ -99,8 +98,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return tx.productVariant.update({ where: { id: current.id }, data: { ...data, ...(data.price ? { price: new Prisma.Decimal(data.price) } : {}) } });
     });
     res.json({ variant });
-  }));
-  app.post("/api/admin/variants/:id/stock", admin, route(async (req, res) => {
+  });
+  app.post("/api/admin/variants/:id/stock", admin, async (req, res) => {
     const data = z.object({ onHand: z.number().int().min(0).max(100000), reason: text }).parse(req.body);
     await transaction(db, async tx => {
       const v = await tx.productVariant.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { product: true } });
@@ -108,11 +107,11 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (data.onHand !== v.onHand) await move(tx, { variantId: v.id, actorId: req.session.userId!, type: "ADJUSTMENT", onHandDelta: data.onHand - v.onHand, reservedDelta: 0, reason: data.reason });
     });
     res.json({ message: "Stock updated" });
-  }));
-  app.get("/api/admin/products/:id/inventory", admin, route(async (req, res) => {
+  });
+  app.get("/api/admin/products/:id/inventory", admin, async (req, res) => {
     res.json({ movements: await db.inventoryMovement.findMany({ where: { variant: { productId: param(req, "id") } }, include: { variant: { select: { sku: true } } }, orderBy: { createdAt: "desc" }, take: 100 }) });
-  }));
-  app.post("/api/admin/batches", admin, route(async (req, res) => {
+  });
+  app.post("/api/admin/batches", admin, async (req, res) => {
     const data = z.object({ productId: text, name: text, opensAt: z.iso.datetime(), closesAt: z.iso.datetime(), productionWeeks: z.number().int().min(1).max(52).default(4), announcement: z.string().max(2000).default(""), status: z.enum(["DRAFT", "OPEN"]).default("DRAFT") }).parse(req.body);
     if (new Date(data.opensAt) >= new Date(data.closesAt)) fail("Opening must precede closing", 400);
     if (new Date(data.closesAt) <= new Date()) fail("Choose a future closing date", 400);
@@ -122,8 +121,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return tx.batch.create({ data });
     });
     res.status(201).json({ batch });
-  }));
-  app.patch("/api/admin/batches/:id", admin, route(async (req, res) => {
+  });
+  app.patch("/api/admin/batches/:id", admin, async (req, res) => {
     const data = z.object({ status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional(), opensAt: z.iso.datetime().optional(), closesAt: z.iso.datetime().optional(), productionWeeks: z.number().int().min(1).max(52).optional() }).parse(req.body);
     const batch = await transaction(db, async tx => {
       const current = await tx.batch.findUniqueOrThrow({ where: { id: param(req, "id") } });
@@ -140,8 +139,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       return tx.batch.update({ where: { id: current.id }, data });
     });
     res.json({ batch });
-  }));
-  app.post("/api/admin/batches/:id/receive", admin, route(async (req, res) => {
+  });
+  app.post("/api/admin/batches/:id/receive", admin, async (req, res) => {
     const data = z.object({ items: z.array(z.object({ variantId: text, quantity: z.number().int().min(1).max(100000) })).min(1).max(100), reason: text }).parse(req.body);
     await transaction(db, async tx => {
       const batch = await tx.batch.findUniqueOrThrow({ where: { id: param(req, "id") } });
@@ -155,21 +154,21 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       for (const order of orders) await allocateBatch(tx, order.id);
     });
     res.json({ message: "Batch stock received and allocated to paid orders" });
-  }));
-  app.get("/api/payment-methods", route(async (_req, res) => res.json({ methods: await db.paymentMethod.findMany({ where: { enabled: true }, orderBy: { name: "asc" } }) })));
-  app.get("/api/admin/payment-methods", admin, route(async (_req, res) => res.json({ methods: await db.paymentMethod.findMany({ orderBy: { name: "asc" } }) })));
+  });
+  app.get("/api/payment-methods", async (_req, res) => res.json({ methods: await db.paymentMethod.findMany({ where: { enabled: true }, orderBy: { name: "asc" } }) }));
+  app.get("/api/admin/payment-methods", admin, async (_req, res) => res.json({ methods: await db.paymentMethod.findMany({ orderBy: { name: "asc" } }) }));
   const methodSchema = z.object({ name: text, type: z.enum(["QRIS", "BANK_TRANSFER"]), instructions: z.string().max(2000).default(""), qrImageKey: image, bankName: text.nullable().optional(), accountName: text.nullable().optional(), accountNumber: text.nullable().optional(), enabled: z.boolean().default(true) }).superRefine((v, ctx) => {
     if (v.type === "QRIS" ? !v.qrImageKey : !v.bankName || !v.accountName || !v.accountNumber) ctx.addIssue({ code: "custom", message: "Provide the QR image or complete bank details" });
   });
-  app.post("/api/admin/payment-methods", admin, route(async (req, res) => {
+  app.post("/api/admin/payment-methods", admin, async (req, res) => {
     const data = methodSchema.parse(req.body);
     res.status(201).json({ method: await db.paymentMethod.create({ data: { ...data, ...(data.type === "QRIS" ? { bankName: null, accountName: null, accountNumber: null } : { qrImageKey: null }) } }) });
-  }));
-  app.patch("/api/admin/payment-methods/:id", admin, route(async (req, res) => {
+  });
+  app.patch("/api/admin/payment-methods/:id", admin, async (req, res) => {
     const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
     res.json({ method: await db.paymentMethod.update({ where: { id: param(req, "id") }, data: { enabled } }) });
-  }));
-  app.post("/api/orders", auth, route(async (req, res) => {
+  });
+  app.post("/api/orders", auth, async (req, res) => {
     const data = z.object({ items: z.array(z.object({ variantId: text, quantity: z.number().int().min(1).max(100), batchId: text.nullable().optional(), embroideryName: z.string().trim().min(1).max(80).optional() })).min(1).max(30), paymentPlan: z.enum(["FULL", "BATCH_DEPOSIT"]).default("FULL"), customerName: z.string().trim().min(2).max(100), customerPhone: z.string().trim().min(6).max(30) }).parse(req.body);
     const key = z.string().uuid().parse(req.get("idempotency-key"));
     const create = async () => transaction(db, async tx => {
@@ -200,16 +199,16 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (!old || old.userId !== req.session.userId) throw error;
       res.json({ order: orderDto(old) });
     }
-  }));
-  app.post("/api/orders/:id/cancel", auth, route(async (req, res) => {
+  });
+  app.post("/api/orders/:id/cancel", auth, async (req, res) => {
     await transaction(db, async tx => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: param(req, "id") } });
       if (order.userId !== req.session.userId) fail("Order not found", 404);
       await releaseOrder(tx, order.id, "CANCELLED", req.session.userId);
     });
     res.json({ message: "Order cancelled" });
-  }));
-  app.post("/api/orders/:id/proof", auth, express.raw({ type: ["image/png", "image/jpeg"], limit: "5mb" }), route(async (req, res) => {
+  });
+  app.post("/api/orders/:id/proof", auth, express.raw({ type: ["image/png", "image/jpeg"], limit: "5mb" }), async (req, res) => {
     const methodId = text.parse(req.get("x-payment-method"));
     const reference = z.string().trim().max(200).parse(req.get("x-payment-reference") ?? "");
     const buffer: unknown = req.body;
@@ -232,15 +231,15 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       });
       res.status(202).json({ submission: { id: submission.id, status: submission.status } });
     } catch (error) { await unlink(path.join(receiptDirectory, key)).catch(() => {}); throw error; }
-  }));
-  app.get("/api/payment-submissions/:id/proof", auth, route(async (req, res) => {
+  });
+  app.get("/api/payment-submissions/:id/proof", auth, async (req, res) => {
     const s = await db.paymentSubmission.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { order: { select: { userId: true } } } });
     if (req.session.role !== "ADMIN" && s.order.userId !== req.session.userId) fail("Receipt not found", 404);
     if (!/^[a-f0-9-]+\.(png|jpg)$/.test(s.proofKey)) fail("Receipt unavailable", 404);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.sendFile(path.join(receiptDirectory, s.proofKey));
-  }));
-  app.post("/api/admin/payment-submissions/:id/review", admin, route(async (req, res) => {
+  });
+  app.post("/api/admin/payment-submissions/:id/review", admin, async (req, res) => {
     const data = z.object({ action: z.enum(["VERIFIED", "REJECTED"]), reason: z.string().trim().max(1000).default(""), reference: z.string().trim().max(200).default("") }).parse(req.body);
     if (data.action === "REJECTED" ? !data.reason : !data.reference) fail("Provide a rejection reason or verified merchant reference", 400);
     await transaction(db, async tx => {
@@ -262,8 +261,8 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       await allocateBatch(tx, s.orderId);
     });
     res.json({ message: data.action === "VERIFIED" ? "Payment verified" : "Proof rejected; customer may resubmit before the deadline" });
-  }));
-  app.patch("/api/admin/order-items/:id/pickup", admin, route(async (req, res) => {
+  });
+  app.patch("/api/admin/order-items/:id/pickup", admin, async (req, res) => {
     const { status } = z.object({ status: z.enum(["READY_FOR_PICKUP", "COMPLETED"]) }).parse(req.body);
     await transaction(db, async tx => {
       const item = await tx.orderItem.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { order: true } });
@@ -276,6 +275,6 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       await tx.orderItem.update({ where: { id: item.id }, data: { pickupStatus: status } });
     });
     res.json({ message: "Item pickup status updated" });
-  }));
+  });
   return { expire: () => expireOrders(db) };
 }

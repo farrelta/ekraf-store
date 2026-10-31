@@ -7,7 +7,7 @@
   background-repeat: repeat-x;
   background-position: center bottom;
   border-top: 0;
-  opacity: .75;
+  opacity: .90;
   filter: brightness(0);
   flex-shrink: 0;
   pointer-events: none;
@@ -428,12 +428,6 @@ details p {
   line-height: 15px;
   letter-spacing: 0;
 }
-.header-search {
-  display: flex;
-  gap: 8px;
-  padding-top: 12px;
-  padding-bottom: 12px;
-}
 .store-shell {
   min-height: 100vh;
   display: flex;
@@ -532,8 +526,9 @@ details p {
   margin-top: 8px;
 }
 .hero-tee {
-  width: 47%;
-  height: 68%;
+  width: 38%;
+  height: auto;
+  aspect-ratio: 1836 / 2304;
   right: 39%;
   z-index: 1;
 }
@@ -827,16 +822,14 @@ details p {
   flex-wrap: wrap;
   gap: 10px;
 }
-.choice,
-.size-choice {
+.choice {
   padding: 9px 14px;
   border: 1px solid var(--line);
   font-size: 12px;
   min-width: 40px;
   border-radius: 3px;
 }
-.choice.selected,
-.size-choice.selected {
+.choice.selected {
   border-color: var(--green);
   background: #e3e9df;
   color: var(--green);
@@ -1214,12 +1207,6 @@ details p {
 }
 .cart-item .quantity-control {
   margin-top: 12px;
-}
-.payment-plan {
-  display: flex;
-  flex-direction: row;
-  align-items: start;
-  gap: 10px;
 }
 .auth-page {
   max-width: 460px;

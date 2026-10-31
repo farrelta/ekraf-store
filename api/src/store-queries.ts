@@ -3,11 +3,6 @@ import { z } from "zod";
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
 import { fail, orderDto, orderInclude } from "./store-service.js";
 
-const route =
-  (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler =>
-  (req, res, next) => {
-    void fn(req, res).catch(next);
-  };
 const id = (req: Request) => String(req.params.id ?? "");
 export const pageSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -69,11 +64,6 @@ const pagination = (page: number, pageSize: number, total: number) => ({
   total,
   pageCount: Math.ceil(total / pageSize),
 });
-const batchPublic = {
-  status: "OPEN" as const,
-  opensAt: { lte: new Date() },
-  closesAt: { gt: new Date() },
-};
 const productInclude = {
   variants: { orderBy: { sku: "asc" as const } },
   batches: { orderBy: { closesAt: "asc" as const } },
@@ -82,7 +72,7 @@ const publicInclude = () => ({
   variants: { where: { active: true }, orderBy: { sku: "asc" as const } },
   batches: {
     where: {
-      ...batchPublic,
+      status: "OPEN" as const,
       opensAt: { lte: new Date() },
       closesAt: { gt: new Date() },
     },
@@ -108,8 +98,8 @@ export function registerQueryRoutes(
   auth: RequestHandler,
   admin: RequestHandler,
 ) {
-  const products = (isAdmin: boolean, exportCsv = false) =>
-    route(async (req, res) => {
+  const products = (isAdmin: boolean, exportCsv = false): RequestHandler =>
+    async (req, res) => {
       const q = pageSchema
         .extend({
           search: z.string().trim().max(100).optional(),
@@ -188,13 +178,13 @@ export function registerQueryRoutes(
         summary,
         categories: categories.map((x) => x.category),
       });
-    });
+    };
   app.get("/api/products", products(false));
   app.get("/api/admin/products/export", admin, products(true, true));
   app.get("/api/admin/products", admin, products(true));
   app.get(
     "/api/cart/variants",
-    route(async (req, res) => {
+    async (req, res) => {
       const ids = z
         .string()
         .max(5000)
@@ -213,32 +203,32 @@ export function registerQueryRoutes(
           include: { product: { include: publicInclude() } },
         }),
       });
-    }),
+    },
   );
   app.get(
     "/api/products/:id",
-    route(async (req, res) => {
+    async (req, res) => {
       const p = await db.product.findFirst({
         where: { id: id(req), status: "PUBLISHED" },
         include: publicInclude(),
       });
       if (!p) return fail("Product not found", 404);
       res.json({ product: productDto(p) });
-    }),
+    },
   );
   app.get(
     "/api/admin/products/:id",
     admin,
-    route(async (req,res) => {
+    async (req,res) => {
       const p=await db.product.findUniqueOrThrow({where:{id:id(req)},include:productInclude});
       const referenced=await db.orderItem.groupBy({by:['variantId'],where:{variant:{productId:p.id}}});
       const ids=new Set(referenced.map(item=>item.variantId));
       res.json({product:{...productDto(p),variants:p.variants.map(v=>({...v,hasOrderHistory:ids.has(v.id)}))}});
-    }),
+    },
   );
 
-  const batchList = (isAdmin: boolean) =>
-    route(async (req, res) => {
+  const batchList = (isAdmin: boolean): RequestHandler =>
+    async (req, res) => {
       const q = pageSchema
           .extend({
             status: z
@@ -334,11 +324,11 @@ export function registerQueryRoutes(
         pagination: pagination(q.page, q.pageSize, count),
         summary: { total: all, open, closingSoon, completed },
       });
-    });
+    };
   app.get("/api/batches", batchList(false));
   app.get("/api/admin/batches", admin, batchList(true));
-  const batchDetail = (isAdmin: boolean) =>
-    route(async (req, res) => {
+  const batchDetail = (isAdmin: boolean): RequestHandler =>
+    async (req, res) => {
       const b = await db.batch.findFirst({
         where: {
           id: id(req),
@@ -350,12 +340,12 @@ export function registerQueryRoutes(
       });
       if (!b) return fail("Batch not found", 404);
       res.json({ batch: { ...b, product: productDto(b.product) } });
-    });
+    };
   app.get("/api/batches/:id", batchDetail(false));
   app.get("/api/admin/batches/:id", admin, batchDetail(true));
 
-  const orderList = (isAdmin: boolean) =>
-    route(async (req, res) => {
+  const orderList = (isAdmin: boolean): RequestHandler =>
+    async (req, res) => {
       const q = pageSchema
           .extend({
             payment: z
@@ -440,11 +430,11 @@ export function registerQueryRoutes(
         pagination: pagination(q.page, q.pageSize, count),
         summary: { total: all, pending, processing, ready },
       });
-    });
+    };
   app.get("/api/orders", auth, orderList(false));
   app.get("/api/admin/orders", admin, orderList(true));
-  const orderDetail = (isAdmin: boolean) =>
-    route(async (req, res) => {
+  const orderDetail = (isAdmin: boolean): RequestHandler =>
+    async (req, res) => {
       const o = await db.order.findFirst({
         where: {
           id: id(req),
@@ -454,14 +444,14 @@ export function registerQueryRoutes(
       });
       if (!o) return fail("Order not found", 404);
       res.json({ order: orderDto(o) });
-    });
+    };
   app.get("/api/orders/:id", auth, orderDetail(false));
   app.get("/api/admin/orders/:id", admin, orderDetail(true));
 
   app.get(
     "/api/admin/payment-submissions",
     admin,
-    route(async (req, res) => {
+    async (req, res) => {
       const q = pageSchema
           .extend({
             status: z.enum(["SUBMITTED", "VERIFIED", "REJECTED"]).optional(),
@@ -511,12 +501,12 @@ export function registerQueryRoutes(
         pagination: pagination(q.page, q.pageSize, count),
         summary: { pending, approved, rejected },
       });
-    }),
+    },
   );
   app.get(
     "/api/admin/payment-submissions/:id",
     admin,
-    route(async (req, res) => {
+    async (req, res) => {
       const s = await db.paymentSubmission.findUniqueOrThrow({
         where: { id: id(req) },
         include: {
@@ -526,13 +516,13 @@ export function registerQueryRoutes(
       });
       const { proofKey: _key, order, ...submission } = s;
       res.json({ submission, order: orderDto(order) });
-    }),
+    },
   );
 
   const customerCte = Prisma.sql`WITH ot AS(SELECT order_id,SUM(unit_price*quantity) AS value FROM order_items GROUP BY order_id), os AS(SELECT o.user_id,COUNT(*)::int AS orders,COUNT(*) FILTER(WHERE payment_status IN ('PAID','PARTIALLY_PAID'))::int AS paid_orders,COALESCE(SUM(ot.value) FILTER(WHERE payment_status IN ('PAID','PARTIALLY_PAID')),0) AS confirmed_value,MAX(o.created_at) AS last_order,BOOL_OR(EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.batch_id IS NOT NULL) AND payment_status IN ('PAID','PARTIALLY_PAID')) AS batch_buyer FROM orders o JOIN ot ON ot.order_id=o.id GROUP BY o.user_id), spent AS(SELECT o.user_id,SUM(s.amount) AS paid FROM payment_submissions s JOIN orders o ON o.id=s.order_id WHERE s.status='VERIFIED' GROUP BY o.user_id)`;
   const customerSelect = Prisma.sql`SELECT u.id,u.name,u.email,u.created_at AS "createdAt",COALESCE(os.orders,0)::int AS orders,COALESCE(os.paid_orders,0)::int AS "paidOrders",COALESCE(spent.paid,0)::text AS "totalSpent",os.last_order AS "lastOrder" FROM users u LEFT JOIN os ON os.user_id=u.id LEFT JOIN spent ON spent.user_id=u.id`;
-  const customers = (exportCsv = false) =>
-    route(async (req, res) => {
+  const customers = (exportCsv = false): RequestHandler =>
+    async (req, res) => {
       const q = pageSchema
           .extend({
             segment: z.enum(["all", "repeat", "batch"]).default("all"),
@@ -578,25 +568,25 @@ export function registerQueryRoutes(
         pagination: pagination(q.page, q.pageSize, count[0]?.total ?? 0),
         summary,
       });
-    });
+    };
   app.get("/api/admin/customers/export", admin, customers(true));
   app.get("/api/admin/customers", admin, customers());
   app.get(
     "/api/admin/customers/:id",
     admin,
-    route(async (req, res) => {
+    async (req, res) => {
       const rows = await db.$queryRaw<any[]>(
         Prisma.sql`${customerCte} ${customerSelect} WHERE u.role='CUSTOMER' AND u.id=${id(req)}`,
       );
       if (!rows[0]) return fail("Customer not found", 404);
       res.json({ customer: rows[0] });
-    }),
+    },
   );
 
   app.get(
     "/api/admin/dashboard",
     admin,
-    route(async (req, res) => {
+    async (req, res) => {
       const q = pageSchema.parse(req.query),
         r = dateRange(q.from, q.to, true),
         lower = r.lower!,
@@ -678,6 +668,6 @@ export function registerQueryRoutes(
         series,
         recentOrders: recent.map(orderDto),
       });
-    }),
+    },
   );
 }

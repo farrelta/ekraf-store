@@ -1,6 +1,6 @@
-import dotenv from "dotenv";
+import { existsSync } from "node:fs";
 import { Pool } from "pg";
-dotenv.config({ path: "../.env", quiet: true });
+if (existsSync("../.env")) process.loadEnvFile("../.env");
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 5000 });
 const expectedTables = ["users", "products", "product_variants", "batches", "orders", "order_items", "payment_methods", "payment_submissions", "inventory_movements", "session"];

@@ -113,10 +113,6 @@
   .mobile-back button {
     padding: 2px;
   }
-  .header-search {
-    padding-top: 12px;
-    padding-bottom: 12px;
-  }
   .store-shell {
     padding-bottom: 68px;
   }
@@ -220,8 +216,6 @@
     margin-top: 16px;
   }
   .hero-tee {
-    width: 47%;
-    height: 68%;
     right: 46%;
     bottom: 0 !important;
   }
@@ -914,17 +908,6 @@
   .payment-order .pay-instructions {
     padding: 10px 0;
   }
-  .cart-page .checkout-grid > aside {
-    padding: 20px;
-  }
-  .cart-quantity {
-    max-width: 100px;
-  }
-  .radio-option {
-    flex-direction: row;
-    align-items: start;
-    gap: 10px;
-  }
 }
 .cart-page .checkout-grid > aside {
   padding: 22px;
@@ -942,6 +925,10 @@
     display: none;
   }
   .mobile-routebar {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 60;
+    background: white;
     height: 58px;
     border-bottom: 1px solid var(--line);
     display: flex;
@@ -968,11 +955,6 @@
     display: none;
   }
 }
-.hero-tee {
-  width: 38%;
-  height: auto;
-  aspect-ratio: 1836 / 2304;
-}
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;
@@ -983,7 +965,6 @@
 
 @media(max-width:767px){
  .admin-shell{padding-top:58px}
- .mobile-routebar{position:fixed;inset:0 0 auto;z-index:60;background:white}
 }
 /* Focus belongs to the complete search control and navigation target. */
 .compact-search:focus-within{outline:2px solid var(--green);outline-offset:3px}
