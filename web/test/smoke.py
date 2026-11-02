@@ -93,6 +93,7 @@ with sync_playwright() as p:
     cp.get_by_role('button',name='Add reviewed item to cart').click();cp.wait_for_url('**/cart')
     cp.goto(base+'/register?next=/cart');cp.wait_for_load_state('networkidle')
     cp.get_by_label('Name',exact=True).fill('Browser Customer')
+    cp.get_by_label('WhatsApp / phone number',exact=True).fill('081234567890')
     cp.get_by_label('Email',exact=True).fill('browser-'+uuid4().hex[:8]+'@example.test')
     cp.get_by_label('Password',exact=True).fill('test-password-12345')
     cp.get_by_role('button',name='Create account',exact=True).click();cp.wait_for_url('**/cart')

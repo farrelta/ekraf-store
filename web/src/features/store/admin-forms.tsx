@@ -25,6 +25,7 @@ function Field({
   type = "text",
   required = false,
   min,
+  step,
 }: {
   label: string;
   name: string;
@@ -32,6 +33,7 @@ function Field({
   type?: string;
   required?: boolean;
   min?: number;
+  step?: string;
 }) {
   return (
     <label>
@@ -42,7 +44,7 @@ function Field({
         defaultValue={value}
         required={required}
         min={min}
-        step={type === "number" ? "1" : undefined}
+        step={step ?? (type === "number" ? "1" : undefined)}
       />
     </label>
   );
@@ -126,7 +128,7 @@ export function ProductEditor({ id }: { id?: string }) {
           <Link className="text-link" href={base + "/products"}>
             ‹ Products
           </Link>
-          {p && <section className="panel form-section"><h2>Permanent deletion</h2><p>Only unused drafts with no batches, orders, stock, or stock history can be deleted. Archive other products to preserve their records.</p><button type="button" className="button-danger" disabled={deleting || p.status !== "DRAFT"} onClick={() => void deleteProduct()}>{deleting ? "Deleting…" : "Permanently delete product"}</button></section>}
+
           <ActionForm
             key={p?.updatedAt || "new"}
             submit={async (f) => {
@@ -137,6 +139,7 @@ export function ProductEditor({ id }: { id?: string }) {
                 imageKey: get(f, "imageKey") || null,
                 status: get(f, "status"),
                 featured: f.get("featured") === "on",
+                embroideryRequired: f.get("embroideryRequired") === "on",
               };
               if (id) await mutate(`/api/admin/products/${id}`, body, "PATCH");
               else {
@@ -164,6 +167,7 @@ export function ProductEditor({ id }: { id?: string }) {
                   </select>
                 </label>
               )}
+              {(p?.sellingType === "BATCH" || (!id && type === "BATCH")) && <label className="check-label"><input name="embroideryRequired" type="checkbox" defaultChecked={p?.embroideryRequired ?? true} /> Require an embroidery name for each item</label>}
               <Field
                 label="Product name"
                 name="name"
@@ -265,6 +269,7 @@ export function ProductEditor({ id }: { id?: string }) {
                     <div className="form-grid">
                       <Field
                         label="Price (IDR)"
+                        step="0.01"
                         name="price"
                         type="number"
                         value={v.price}
@@ -356,6 +361,7 @@ export function ProductEditor({ id }: { id?: string }) {
               )}
             </>
           )}
+          {p && <section className="panel form-section"><h2>Permanent deletion</h2><p>Only unused drafts with no batches, orders, stock, or stock history can be deleted. Archive other products to preserve their records.</p><button type="button" className="button-danger" disabled={deleting || p.status !== "DRAFT"} onClick={() => void deleteProduct()}>{deleting ? "Deleting…" : "Permanently delete product"}</button></section>}
         </>
       )}
     </State>
@@ -375,13 +381,13 @@ export function BatchEditor({ id }: { id?: string }) {
     id ? `/api/admin/batches/${id}` : null,
   );
   const { data: products } = useData(
-      !id ? "/api/admin/products?type=BATCH&pageSize=100" : null,
+      !id ? "/api/admin/products?type=BATCH&scope=catalog&pageSize=100" : null,
     ),
     [productId, setProductId] = useState(""),
     [productSearch, setProductSearch] = useState("");
   const { data: searched } = useData(
     !id && productSearch
-      ? "/api/admin/products?type=BATCH&pageSize=100&q=" +
+      ? "/api/admin/products?type=BATCH&scope=catalog&pageSize=100&q=" +
           encodeURIComponent(productSearch)
       : null,
   );
@@ -404,15 +410,10 @@ export function BatchEditor({ id }: { id?: string }) {
             key={b?.updatedAt || "new"}
             submit={async (f) => {
               const fields = {
-                announcement: get(f, "announcement"),
                 productionWeeks: Number(get(f, "weeks")),
                 status: get(f, "status"),
-                ...(editable
-                  ? {
-                      opensAt: new Date(get(f, "opensAt")).toISOString(),
-                      closesAt: new Date(get(f, "closesAt")).toISOString(),
-                    }
-                  : {}),
+                ...(editable && (!b || get(f, "opensAt") !== localInput(b.opensAt)) ? { opensAt: new Date(get(f, "opensAt")).toISOString() } : {}),
+                ...(editable && (!b || get(f, "closesAt") !== localInput(b.closesAt)) ? { closesAt: new Date(get(f, "closesAt")).toISOString() } : {}),
               };
               if (id) await mutate(`/api/admin/batches/${id}`, fields, "PATCH");
               else {
@@ -509,35 +510,15 @@ export function BatchEditor({ id }: { id?: string }) {
                     aria-label="Status"
                     defaultValue={b?.status || "DRAFT"}
                   >
-                    {(id
-                      ? [
-                          "DRAFT",
-                          "OPEN",
-                          "CLOSED",
-                          "IN_PRODUCTION",
-                          "READY",
-                          "COMPLETED",
-                          "CANCELLED",
-                        ]
-                      : ["DRAFT", "OPEN"]
-                    ).map((s) => (
-                      <option key={s}>{s}</option>
+                    {(b ? [{ status: b.status, blockedReason: null }, ...(b.actions || [])] : [{ status: "DRAFT", blockedReason: null }, { status: "OPEN", blockedReason: null }]).map((action: { status: string; blockedReason: string | null }) => (
+                      <option key={action.status} value={action.status} disabled={!!action.blockedReason}>
+                        {b && action.status === b.status ? `Keep current status (${b.status.replaceAll("_", " ")})` : ({ DRAFT: "Save as draft", OPEN: "Open ordering", CLOSED: "Close ordering", IN_PRODUCTION: "Start production", READY: "Mark batch ready", COMPLETED: "Complete batch", CANCELLED: "Cancel batch" } as Record<string, string>)[action.status]}
+                      </option>
                     ))}
                   </select>
                 </label>
+                {b?.actions?.filter((action: { blockedReason: string | null }) => action.blockedReason).map((action: { status: string; blockedReason: string }) => <p className="muted" key={action.status}>{action.blockedReason}</p>)}
               </div>
-            </section>
-            <section className="panel form-section">
-              <h2>Announcement</h2>
-              <label>
-                Announcement message
-                <textarea
-                  name="announcement"
-                  rows={4}
-                  defaultValue={b?.announcement}
-                  maxLength={2000}
-                />
-              </label>
             </section>
             <button className="button-primary">
               {id ? "Save batch" : "Create batch order"}
@@ -567,7 +548,7 @@ export function BatchEditor({ id }: { id?: string }) {
                   {p.variants.map((v: any) => (
                     <Field
                       key={v.id}
-                      label={`${v.size} / ${v.color} · ${v.sku}`}
+                      label={`${[v.size, v.color, v.type].filter(value => value && value !== "STANDARD").join(" / ") || "Standard"} · ${v.sku}`}
                       name={v.id}
                       type="number"
                       min={0}

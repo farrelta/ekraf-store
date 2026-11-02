@@ -1,4 +1,4 @@
-// Initial EKRAF BEM MIPA UGM store design for drawDB: nine application tables.
+// Initial EKRAF BEM MIPA UGM store design for drawDB: ten application tables.
 // Proposed design only; application schema and migrations are managed separately.
 // All IDs are application-generated opaque text. All monetary amounts are IDR.
 // Rules in Notes require SQL constraints/triggers or application validation.
@@ -70,6 +70,7 @@ Table users [headercolor: #175e7a] {
   id text [pk, not null]
   email text [not null, unique]
   name text [not null]
+  phone text [note: 'Required for new customers; existing accounts complete it at checkout.']
   password_hash text [not null]
   role roles [not null, default: 'CUSTOMER']
   created_at timestamp [not null, default: `now()`]
@@ -83,6 +84,7 @@ Table products [headercolor: #175e7a] {
   image_key text
   selling_type selling_types [not null]
   status product_status [not null, default: 'DRAFT']
+  embroidery_required boolean [not null, default: true]
   featured boolean [not null, default: false]
   created_at timestamp [not null, default: `now()`]
   updated_at timestamp [not null]
@@ -162,7 +164,7 @@ Table order_items [headercolor: #175e7a] {
     variant_id
     (batch_id, pickup_status)
   }
-  Note: 'batch_id is required for BATCH products and null for continuous products. Validate that batch and variant belong to the same product. Merchandise can be collected after its initial payment is verified, independently of batch items. Batch collection requires the order balance fully verified. Description snapshots product name, size/color and SKU; unit_price is the checkout price snapshot. Enforce quantity > 0 and unit_price >= 0. Product is obtained through variant_id. A nonblank embroidery_name is required for BATCH purchases and absent for CONTINUOUS purchases. Each line applies one embroidery name to all its units; use separate lines for different names. Do not impose unique(order_id, variant_id).'
+  Note: 'batch_id is required for BATCH products and null for continuous products. Validate that batch and variant belong to the same product. Merchandise can be collected after its initial payment is verified, independently of batch items. Batch collection requires the order balance fully verified. Description snapshots product name, size/color and SKU; unit_price is the checkout price snapshot. Enforce quantity > 0 and unit_price >= 0. Product is obtained through variant_id. A nonblank embroidery_name is required only when the batch product offers embroidery; otherwise it is absent. Each line applies one embroidery name to all its units; use separate lines for different names. Do not impose unique(order_id, variant_id).'
 }
 
 Table payment_methods [headercolor: #175e7a] {
@@ -196,7 +198,7 @@ Table payment_submissions [headercolor: #175e7a] {
     (order_id, submitted_at)
     (status, submitted_at)
   }
-  Note: 'proof_key identifies a private receipt, retrieved only by its owner or authorized staff. method_snapshot preserves method name, type, instructions and destination details at submission time. Enforce amount > 0; verify the actual full order total and merchant transaction before approval. Only ADMIN can review. SUBMITTED requires null reviewer/reviewed_at; reviewed decisions require both; rejection requires a nonblank reason. Rejecting the initial payment permits resubmission before its 24-hour deadline; a paid deposit is preserved when balance evidence is rejected. Retain old attempts and freeze reviewed decisions. Allow at most one SUBMITTED per order and one VERIFIED per order/phase using partial unique indexes. INITIAL and BALANCE are verified independently. Prevent reuse of a verified merchant transaction reference per payment method using a partial unique index. Review and order payment transition are atomic; proof upload alone never marks an order paid.'
+  Note: 'proof_key identifies a private receipt, retrieved only by its owner or authorized staff. method_snapshot preserves method name, type, instructions and destination details at submission time. Enforce amount > 0; verify the actual full order total and merchant transaction before approval. Only ADMIN can review. SUBMITTED requires null reviewer/reviewed_at; reviewed decisions require both; rejection requires a nonblank reason. Rejecting the initial payment permits resubmission before its 24-hour deadline; a paid deposit is preserved when balance evidence is rejected. Retain old attempts and freeze reviewed decisions. Allow at most one SUBMITTED per order and one VERIFIED per order/phase using partial unique indexes. INITIAL and BALANCE are verified independently. References are optional legacy API fields; when supplied, a partial unique index prevents reuse per payment method. The forms do not request them. Review and order payment transition are atomic; proof upload alone never marks an order paid.'
 }
 
 Table inventory_movements [headercolor: #175e7a] {
@@ -263,4 +265,17 @@ Ref movement_actor {
 
 Ref movement_item {
   inventory_movements.order_item_id > order_items.id [delete: restrict, update: cascade]
+}
+
+Table announcements [headercolor: #175e7a] {
+ id text [pk, not null]
+ title text [not null]
+ body text [not null]
+ published boolean [not null, default: false]
+ starts_at timestamp
+ ends_at timestamp
+ created_at timestamp [not null, default: `now()`]
+ updated_at timestamp [not null]
+ indexes { (published, starts_at, ends_at) }
+ Note: 'Independent store news, sales, maintenance and pickup instructions. Public only when published and within optional start/end dates. Validate end > start. Legacy batch announcement text is retained and copied into editable drafts.'
 }

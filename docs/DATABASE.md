@@ -1,31 +1,59 @@
-# Database
+# Database and business rules
 
-Nine application tables remain: users, products, product_variants, batches, orders, order_items, payment_methods, payment_submissions, inventory_movements. Express session and Prisma migration infrastructure tables are additional. The diagram is docs/schema.dbml.
+The authoritative model is [`api/prisma/schema.prisma`](../api/prisma/schema.prisma); [`schema.dbml`](schema.dbml) is the importable drawDB diagram. Prisma uses camelCase in code and snake_case physical mappings.
 
-Products use CONTINUOUS or BATCH selling type and DRAFT/PUBLISHED/ARCHIVED publication status. Each product has at least one size/color variant with unique SKU and product/size/color combination. STANDARD represents a missing option. Batch products require preset sizes and store one integer production estimate in weeks. Accounts have only ADMIN and CUSTOMER roles.
+## Tables
 
-## Mixed checkout
+Ten application tables, plus session and Prisma migration infrastructure:
 
-An order can contain merchandise and several batches. batch_id and pickup_status belong to order_items. Each batch item must reference a matching product batch that is open at checkout and must have an embroidery name. Merchandise has neither batch nor embroidery. Historical item descriptions and unit prices are snapshotted; total is derived in IDR.
+| Table | Purpose |
+| --- | --- |
+| `users` | CUSTOMER/ADMIN accounts and saved contact details. |
+| `products` | Catalog content, category, selling type, publication/featured state, embroidery requirement. |
+| `product_variants` | Immutable SKU, optional size/color/type, price, on-hand/reserved quantities, active state. |
+| `batches` | Product production windows, lifecycle, integer production estimate in weeks. |
+| `orders` | Customer/contact snapshots, idempotency key, payment plan, initial amount, deadline/status. |
+| `order_items` | Historical description/price, quantity, optional batch/embroidery, independent pickup state. |
+| `payment_methods` | Enabled QRIS/bank destinations and instructions. |
+| `payment_submissions` | Private proof, destination snapshot, installment amount, review decision/reviewer. |
+| `inventory_movements` | Append-only stock/reservation ledger and SKU snapshots. |
+| `announcements` | Independent published/scheduled store and pickup messages. |
 
-orders.payment_plan is FULL or BATCH_DEPOSIT. initial_amount snapshots the server-calculated initial payment: total, or full merchandise plus half the batch subtotal rounded to two decimals. The balance is total minus verified payments. payment_submissions.phase distinguishes INITIAL and BALANCE. Payment status is PENDING, PARTIALLY_PAID, PAID, EXPIRED, or CANCELLED.
+## Products and variants
 
-Initial checkout expires after 24 hours unless timely proof is under review. Verified deposits are retained and the original deadline does not expire the balance. Balance payment must be verified before batch pickup. One SUBMITTED proof is allowed per order and one VERIFIED proof per phase. Reviewed evidence and stock history are protected by SQL triggers.
+Products are CONTINUOUS or BATCH, with DRAFT/PUBLISHED/ARCHIVED status. Each has at least one variant. Size/color/type values are normalized before enforcing uniqueness across product + size + color + type. `STANDARD` represents an absent option and is hidden from customers. Batch variants require preset clothing sizes. Embroidery names belong to order lines and are required only when the batch product offers personalization.
 
-## Inventory and collection
+SKU generation is server-side and immutable. Existing API clients may supply an explicit SKU. Price, category, profile, and payment-method changes do not rewrite historical snapshots. Variant options can change only before any order history exists; price and active state remain editable.
 
-Continuous checkout reserves merchandise; initial approval consumes those reservations. Cancellation/expiry of an unpaid initial checkout releases them exactly once. Balance approval does not touch merchandise stock again. Serializability and bounded retries prevent conflicting stock and payment operations.
+## Checkout and manual payments
 
-Batch checkout does not consume ready stock. Production receipts tag batch and variant. Allocation reserves received units for individual paid/deposit-paid lines, marking each allocated line ready. Orders from another batch cannot spend those receipts. Batch collection requires the remaining balance verified, consumes the item reservation, and marks that item completed. Merchandise may be collected while batch items are still processing.
+One order may contain continuous merchandise and several batches. Each batch line references its chosen matching product batch, which must be open and within its ordering dates. Continuous lines have no batch or embroidery. Totals derive from historical unit price × quantity, in IDR using Decimal arithmetic.
 
-Inventory movements reference order_item_id for new line-specific changes. Historical entries may have a null item reference. On-hand and reservation counters reconcile to appended ledger deltas. SQL checks reject invalid balances, quantities, prices, batch windows, review evidence and duplicate verified references. Reference deletion is restricted.
+- `FULL`: pay the whole order initially.
+- `BATCH_DEPOSIT`: pay all merchandise plus 50% of the batch subtotal, rounded to two decimals. Merchandise-only orders cannot use this plan.
 
-## Migrations
+Example: Rp85,000 merchandise + Rp265,000 jacket totals Rp350,000. Deposit checkout requires Rp217,500 initially, with Rp132,500 remaining before batch pickup.
 
-The historical baseline and Flowstep migrations remain. The earlier minimal schema migration is a fresh-start conversion and refuses populated legacy data; the new 20261031000000_mixed_checkout_deposits migration preserves current orders by copying their batch references and pickup progress to items before removing order-level fields. Existing orders retain FULL payment plans and their full historical amount as initial_amount. It updates the verified-payment uniqueness rule by installment phase.
+Initial proof must arrive within 24 hours. Timely pending evidence holds stock during review. Rejection requires a reason and permits resubmission while the initial window remains valid. A verified deposit preserves the order beyond its original deadline; rejecting balance evidence preserves accepted payments.
 
-Run npm run db:generate, npm run db:migrate, and npm run db:check. The read-only checker verifies table/migration availability, product/batch links, embroidery, stock-ledger reconciliation, role validity and payment totals. Back up the database before migrations and rehearse on an isolated database.
+The server permits one SUBMITTED proof per order and one VERIFIED proof per INITIAL/BALANCE phase. Review transitions and related stock changes are atomic; reviewed evidence is immutable. Uploading proof does not mark an order paid. The forms do not request transaction references: admins must verify actual money in the official account. Older API clients may still supply a reference; supplied verified references cannot be reused per payment method.
 
-A deliberate local reset still uses docker compose -p mipa-store down --volumes, followed by docker compose -p mipa-store up -d --wait and npm run db:migrate. This discards project data and should only be used when explicitly intended. Receipt storage is outside the Docker volume.
+## Inventory and campus pickup
 
-Back up both PostgreSQL and the private receipt directory to restricted storage outside the app host. Restore them together to a separate environment and verify payment evidence, item pickup states and ledger reconciliation. No remote backup infrastructure is configured by the repository.
+Available continuous stock is `on_hand - reserved`. Checkout reserves it; initial approval consumes physical stock and reservations. Unpaid cancellation/expiry releases reservations once. The expiry worker runs every minute and skips evidence awaiting review. Balance approval never consumes merchandise a second time. Serializable transactions with bounded retries handle races.
+
+Batch checkout does not reserve ready stock. Close ordering before production/receipt; admins may close early. Payment verification does not require waiting for the batch deadline. Receipts identify batch and variant; received units are allocated to paid/deposit-paid lines within that batch. Collecting a batch item requires the order's remaining balance verified and consumes that item's physical/reserved units. Merchandise may be collected earlier, independently.
+
+Inventory balances reconcile to ledger deltas. Stock movements are append-only; automatic variant-reference detachment is the limited exception. Continuous stock of 1–5 is low; zero is sold out.
+
+## Retention and announcements
+
+Permanent product deletion is limited to unused DRAFT products with no batches, orders, stock, or ledger history. Other products are archived. A variant may be deleted only if it has no order history and is not the last variant; its stock history retains the SKU and detaches the variant reference. Disable referenced payment methods rather than deleting them.
+
+Announcements are separate from batches. Public messages must be published and within optional start/end dates; end must follow start. Legacy batch announcement text was retained and copied into drafts for review/publishing.
+
+## Migrations and integrity
+
+Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:check`. The checker verifies migrations/tables, product/batch relationships, historical embroidery validity, inventory reconciliation, roles, and verified totals.
+
+Commit migration files. Back up PostgreSQL and private receipts before changing a populated store; rehearse on a restored isolated copy. Never reset a populated database to apply an additive migration. The historical `20261030000000_minimal_ekraf` fresh-start transition refuses populated legacy data; later migrations preserve the current model's records. Recovery and retention responsibilities are in [Operations](OPERATIONS.md).

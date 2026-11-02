@@ -70,10 +70,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [csrf],
   );
   const refreshAuth = useCallback(async () => {
-    const responses = await Promise.all([
-      fetch("/api/csrf", { credentials: "include", cache: "no-store" }),
-      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }),
-    ]);
+    // Establish the session cookie before another request can create a competing session.
+    const csrfResponse = await fetch("/api/csrf", { credentials: "include", cache: "no-store" });
+    const meResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+    const responses = [csrfResponse, meResponse];
     if (responses.some((r) => !r.ok))
       throw new Error("Could not load your session. Refresh to retry.");
     const [c, m] = await Promise.all(responses.map((r) => r.json()));

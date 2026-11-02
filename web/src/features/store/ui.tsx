@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { useStore } from "./store-provider";
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, ReactNode> = {
@@ -89,16 +89,28 @@ export function Notice() {
   return notice ? (
     <div className="notice" role="status" aria-live="polite">
       <span>{notice}</span>
+      <span className="notice-progress" aria-hidden="true" key={notice} />
       <button aria-label="Dismiss notification" onClick={() => report("")}>
         ×
       </button>
     </div>
   ) : null;
 }
+const statusLabels: Record<string, string> = {
+  PARTIALLY_PAID: "Deposit verified",
+  PAID: "Payment verified",
+  PROCESSING: "Preparing your item",
+  READY_FOR_PICKUP: "Ready for campus pickup",
+  COMPLETED: "Completed",
+  SUBMITTED: "Awaiting review",
+  VERIFIED: "Verified",
+  REJECTED: "Proof needs correction",
+  EXPIRED: "Payment window ended",
+};
 export function Badge({ value }: { value: string }) {
   return (
     <span className={`badge badge-${value.toLowerCase()}`}>
-      {value.replaceAll("_", " ")}
+      {statusLabels[value] ?? value.replaceAll("_", " ")}
     </span>
   );
 }
@@ -228,6 +240,7 @@ export function StoreLayout({
             </Link>
           </nav>
           <div className="header-actions">
+            <Link className="announcement-nav-icon" href="/announcements" aria-label="Announcements" title="Announcements" aria-current={pathname === "/announcements" ? "page" : undefined}><Icon name="bell" /></Link>
             <Link
               className="cart-icon"
               href="/cart"
@@ -241,6 +254,7 @@ export function StoreLayout({
             <Link className="button-secondary desktop-only" href="/orders">
               My Orders
             </Link>
+            <Link className="desktop-only small" href="/account">My account</Link>
             {ready && user ? (
               <button
                 className="desktop-only small"
@@ -262,6 +276,7 @@ export function StoreLayout({
       </header>
       <Notice />
       <main>
+        <TestEnvironmentBanner />
         {title && (
           <div className="store-container page-heading">
             <h1>{title}</h1>
@@ -278,7 +293,7 @@ export function StoreLayout({
           <span>Official store of EKRAF BEM MIPA UGM</span>
           <nav>
             <Link href="/">Shop</Link>
-            <Link href="/about">About</Link>
+            <Link href="/about">About</Link><Link href="/announcements">Announcements</Link>
           </nav>
           <small>© {new Date().getFullYear()} EKRAF BEM MIPA UGM</small>
         </div>
@@ -288,7 +303,8 @@ export function StoreLayout({
           {[
             ["/", "Shop", "box"],
             ["/cart", "Cart", "cart"],
-            ["/orders", "My Orders", "users"],
+            ["/orders", "My Orders", "orders"],
+            ["/account", "Account", "users"],
           ].map(([href, label, icon]) => (
             <Link
               key={href}
@@ -349,4 +365,20 @@ export function Avatar({ name }: { name: string }) {
         .toUpperCase()}
     </span>
   );
+}
+
+export function CustomerSupport({ orderId }: { orderId?: string }) {
+  if (process.env.NEXT_PUBLIC_E2E_MODE === "true") return <span className="muted">Test environment: WhatsApp contact is disabled.</span>;
+  const number = (process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP || "6281287845351").replace(/[^0-9]/g, "");
+  const message = orderId ? `Hello EKRAF, I need help with order ${orderId}.` : "Hello EKRAF, I need help with payment or campus pickup.";
+  return number ? <a className="text-link" href={`https://wa.me/${number}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">Contact EKRAF on WhatsApp</a> : <Link className="text-link" href="/about">Contact EKRAF</Link>;
+}
+
+export function TestEnvironmentBanner() {
+  return process.env.NEXT_PUBLIC_E2E_MODE === "true" ? <div className="test-environment-banner" role="note">TEST STORE — simulated payments only. Do not send real money.</div> : null;
+}
+
+export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible,setVisible]=useState(false);
+  return <span className="password-field"><input {...props} aria-label={props["aria-label"] || "Password"} type={visible ? "text" : "password"} /><button type="button" aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible} onClick={()=>setVisible(!visible)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>{visible && <path d="m3 3 18 18"/>}</svg></button></span>;
 }

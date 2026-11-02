@@ -8,7 +8,13 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.e2e.example
 *.log
 api/src/generated/
 api/storage/
 .agents/
+.codex/
+.impeccable/
+.next-e2e/
+web/public/test-fixtures/
+skills-lock.json

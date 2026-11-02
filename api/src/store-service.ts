@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
+export const batchTransitions: Record<string, string[]> = { DRAFT: ["OPEN", "CANCELLED"], OPEN: ["CLOSED", "CANCELLED"], CLOSED: ["IN_PRODUCTION", "CANCELLED"], IN_PRODUCTION: ["READY"], READY: ["COMPLETED"] };
 export const fail = (message: string, status = 409): never => { throw Object.assign(new Error(message), { status }); };
 export const orderInclude = { items: { include: { batch: true } }, paymentSubmissions: { orderBy: { submittedAt: "desc" as const } } } satisfies Prisma.OrderInclude;
 export type StoredOrder = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { type Api, type Order, type PaymentMethod, date, money } from "./types";
-import { Badge, Icon } from "./ui";
+import { Badge, Icon, CustomerSupport } from "./ui";
 export function OrderCard({
   order,
   api,
@@ -25,6 +25,8 @@ export function OrderCard({
   const [busy, setBusy] = useState(false),
     [methodId, setMethodId] = useState(""),
     [fileName, setFileName] = useState("");
+  const reviewHours = Number(process.env.NEXT_PUBLIC_PAYMENT_REVIEW_HOURS || 24);
+  const reviewTime = Number.isFinite(reviewHours) && reviewHours > 0 ? `Payment proof is reviewed within ${reviewHours} hours maximum.` : "Review timing will be confirmed by the EKRAF team.";
   const method = methods.find((m) => m.id === methodId) ?? methods[0];
   const pending = order.paymentSubmissions.some(
       (s) => s.status === "SUBMITTED",
@@ -45,6 +47,23 @@ export function OrderCard({
       setBusy(false);
     }
   };
+  async function copy(value: string) {
+    try { await navigator.clipboard.writeText(value); report("Copied to clipboard."); }
+    catch { window.prompt("Copy this value:", value); }
+  }
+  async function saveQr() {
+    if (!method?.qrImageKey) return;
+    try {
+      const response = await fetch(method.qrImageKey);
+      if (!response.ok) throw new Error("QR image unavailable");
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) throw new Error("Invalid QR image");
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = `ekraf-qris.${({ "image/png": "png", "image/jpeg": "jpg", "image/svg+xml": "svg", "image/webp": "webp" } as Record<string, string>)[blob.type] || "img"}`;
+      link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { report("Use Open QR image, then save or take a screenshot to import into your banking app."); }
+  }
   async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget),
@@ -60,7 +79,6 @@ export function OrderCard({
         headers: {
           "Content-Type": file.type,
           "X-Payment-Method": method.id,
-          "X-Payment-Reference": String(f.get("reference") || ""),
         },
         body: file,
       });
@@ -79,7 +97,6 @@ export function OrderCard({
         body: JSON.stringify({
           action,
           reason: f.get("reason"),
-          reference: f.get("reference"),
         }),
       }),
     );
@@ -107,8 +124,12 @@ export function OrderCard({
             (pending ? (
               <div className="info-note">
                 <Icon name="clock" />
-                Your proof is awaiting review. Reservations stay held while we
-                verify it.
+                <div>
+                  <p>Your proof is awaiting review. Reservations stay held while we verify it.</p>
+                  <p>{reviewTime} If you need an update, contact us with your order reference.</p>
+                  <CustomerSupport orderId={order.id} />
+                  <button type="button" className="button-secondary" disabled={busy} onClick={() => void onChange().catch(error => report(error.message))}>Refresh status</button>
+                </div>
               </div>
             ) : open ? (
               <form className="payment-form" onSubmit={upload}>
@@ -154,7 +175,12 @@ export function OrderCard({
                             src={method.qrImageKey!}
                             alt={`${method.name} QRIS code`}
                           />
-                          <small>Scan with your banking or e-wallet app</small>
+                          <small>On this phone: save the QR image, then import it from your banking or e-wallet app’s QR scanner, if supported.</small>
+                          <div className="button-row">
+                            <button type="button" className="button-secondary" onClick={() => void saveQr()}>Save QR image</button>
+                            <a className="text-link" href={method.qrImageKey!} target="_blank" rel="noreferrer">Open QR image</a>
+                          </div>
+                          <small>You can also scan it using another device.</small>
                         </>
                       ) : (
                         <>
@@ -163,9 +189,11 @@ export function OrderCard({
                             {method.accountNumber}
                           </span>
                           <span>{method.accountName}</span>
+                          <button type="button" className="button-secondary" onClick={() => void copy(method.accountNumber || "")}>Copy account number</button>
                         </>
                       )}
                       <strong>{money(order.amountDue)}</strong>
+                      <button type="button" className="button-secondary" onClick={() => void copy(String(Number(order.amountDue)))}>Copy payment amount</button>
                       <small>Order: {order.id}</small>
                     </div>
                     <details className="pay-instructions">
@@ -197,20 +225,8 @@ export function OrderCard({
                           }
                         />
                       </label>
-                      <div className="form-grid">
-                        <label>
-                          Your name
-                          <input value={order.customerName} readOnly />
-                        </label>
-                        <label>
-                          WhatsApp number
-                          <input value={order.customerPhone} readOnly />
-                        </label>
-                      </div>
-                      <label>
-                        Transaction reference (optional)
-                        <input name="reference" maxLength={200} />
-                      </label>
+                      <dl className="contact-summary"><div><dt>Your name</dt><dd>{order.customerName}</dd></div><div><dt>WhatsApp number</dt><dd>{order.customerPhone}</dd></div></dl>
+                      <p className="muted">Change your details on the <Link className="text-link" href="/account">Account page</Link> for future orders. This order keeps the details recorded at checkout.</p>
                     </div>
                     <button
                       className="button-primary full-width"
@@ -255,7 +271,7 @@ export function OrderCard({
           )}
           {!admin && order.paymentStatus === "PENDING" && !pending && open && (
             <button
-              className="text-link"
+              className="cancel-order-button"
               disabled={busy}
               onClick={() => {
                 if (window.confirm("Cancel this unpaid order?"))
@@ -325,12 +341,9 @@ export function OrderCard({
                           account
                         </li>
                         <li>Confirm payer and destination account</li>
-                        <li>Check transaction date and merchant reference</li>
+                        <li>Check transaction date and confirm the money arrived in the official account</li>
                       </ul>
-                      <label>
-                        Verified bank / merchant transaction reference
-                        <input name="reference" required maxLength={200} />
-                      </label>
+
                       <label>
                         Review reason
                         <input name="reason" maxLength={1000} />
@@ -359,6 +372,7 @@ export function OrderCard({
         </div>
         <aside className="order-summary panel">
           <h2>Order summary</h2>
+          {!admin && <div><p className="muted">EKRAF will arrange the campus pickup location and time with you via WhatsApp. Keep your order reference when contacting us.</p><CustomerSupport orderId={order.id} /></div>}
           {order.items.map((item) => (
             <div className="summary-item" key={item.id}>
               <div className="summary-row">

@@ -105,6 +105,7 @@ model User {
   id           String              @id @default(cuid())
   email        String              @unique
   name         String
+  phone        String?
   passwordHash String              @map("password_hash")
   role         Role                @default(CUSTOMER)
   createdAt    DateTime            @default(now()) @map("created_at")
@@ -116,6 +117,7 @@ model User {
 }
 
 model Product {
+  embroideryRequired Boolean @default(true) @map("embroidery_required")
   featured    Boolean          @default(false)
   id          String           @id @default(cuid())
   category    String?
@@ -278,4 +280,17 @@ model InventoryMovement {
   @@index([orderId])
   @@index([batchId])
   @@map("inventory_movements")
+}
+
+model Announcement {
+  id String @id @default(cuid())
+  title String
+  body String
+  published Boolean @default(false)
+  startsAt DateTime? @map("starts_at")
+  endsAt DateTime? @map("ends_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([published, startsAt, endsAt])
+  @@map("announcements")
 }

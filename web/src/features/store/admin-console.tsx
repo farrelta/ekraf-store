@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { useState, type ReactNode, type FormEvent } from "react";
 import { useStore } from "./store-provider";
-import { Avatar, Icon, Notice, State } from "./ui";
+import { Avatar, Icon, Notice, State, TestEnvironmentBanner, PasswordInput } from "./ui";
 const sections = [
   ["", "Dashboard", "dashboard"],
   ["orders", "Orders", "orders"],
@@ -11,6 +11,7 @@ const sections = [
   ["products", "Products", "box"],
   ["batches", "Batch Orders", "box"],
   ["customers", "Customers", "users"],
+  ["announcements", "Announcements", "orders"],
   ["settings", "Payment Settings", "settings"],
 ];
 export default function AdminConsole({ children }: { children: ReactNode }) {
@@ -108,6 +109,7 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
         <State loading />
       ) : user?.role !== "ADMIN" ? (
         <main className="admin-login panel">
+          <TestEnvironmentBanner />
           <small>EKRAF ADMINISTRATION</small>
           <h1>Admin sign in</h1>
           <p className="muted">
@@ -125,9 +127,8 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
             </label>
             <label>
               Password
-              <input
+              <PasswordInput
                 name="password"
-                type="password"
                 autoComplete="current-password"
                 required
               />
@@ -159,7 +160,7 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
             <nav aria-label="Administration">{nav()}</nav>
             <small>EKRAF Store Admin · {new Date().getFullYear()}</small>
           </aside>
-          <main className="admin-main">{children}</main>
+          <main className="admin-main"><TestEnvironmentBanner />{children}</main>
           <nav
             className="mobile-tabs admin-bottom"
             aria-label="Admin navigation"

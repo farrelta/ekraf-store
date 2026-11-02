@@ -96,6 +96,7 @@ test(
         await this.session();
         const r = await this.call("/auth/register", "POST", {
           name: label,
+          phone: "+6281234567890",
           email: `${label}@example.test`,
           password: "test-password-12345",
           role: "ADMIN",
@@ -155,6 +156,55 @@ test(
         "content-type": "image/png",
         "x-payment-method": method.id,
       });
+    await t.test("registration and saved contact details", async () => {
+      const account = (await alice.call("/auth/me")).body.user;
+      assert.equal(account.phone, "+6281234567890");
+      const anonymous = new Client();
+      await anonymous.session();
+      assert.equal((await anonymous.call("/auth/me", "PATCH", { phone: "+628111111111" })).status, 401);
+      for (const phone of [undefined, "not-a-phone"]) {
+        const response = await anonymous.call("/auth/register", "POST", { name: "Invalid contact", email: "invalid@example.test", password: "test-password-12345", phone });
+        assert.equal(response.status, 400);
+      }
+      assert.equal((await alice.call("/auth/me", "PATCH", { phone: "abc" })).status, 400);
+      const updated = await alice.call("/auth/me", "PATCH", { phone: "+628111111111", role: "ADMIN", userId: adminUser.id });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.user.phone, "+628111111111");
+      assert.equal(updated.body.user.role, "CUSTOMER");
+      assert.equal((await bob.call("/auth/me")).body.user.phone, "+6281234567890");
+      assert.equal((await admin.call("/auth/me")).body.user.phone, "+6281234567890");
+      const login = new Client(); await login.session();
+      const response = await login.call("/auth/login", "POST", { email: "alice@example.test", password: "test-password-12345" });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.user.phone, "+628111111111");
+      assert.equal((await login.call("/auth/me")).body.user.phone, "+628111111111");
+      assert.equal((await login.call("/orders", "POST", {})).status, 403); // new login needs a fresh CSRF token
+      await anonymous.session();
+      assert.equal((await anonymous.call("/orders", "POST", {})).status, 401);
+    });
+    await t.test("customers edit only their own account and confirm email changes", async () => {
+      const original = (await bob.call("/auth/me")).body.user;
+      assert.equal((await bob.call("/auth/me", "PATCH", { email: "new-bob@example.test" })).status, 400);
+      assert.equal((await bob.call("/auth/me", "PATCH", { email: "new-bob@example.test", currentPassword: "incorrect" })).status, 400);
+      const response = await bob.call("/auth/me", "PATCH", {
+        name: "Updated Bob", email: " NEW-BOB@example.test ", phone: "+628777777777", currentPassword: "test-password-12345",
+        id: adminUser.id, role: "ADMIN",
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.user.email, "new-bob@example.test");
+      assert.equal(response.body.user.name, "Updated Bob");
+      assert.equal(response.body.user.phone, "+628777777777");
+      assert.equal(response.body.user.id, original.id);
+      assert.equal(response.body.user.role, "CUSTOMER");
+      assert.equal(response.body.user.passwordHash, undefined);
+      assert.equal((await admin.call("/auth/me")).body.user.email, "admin@example.test");
+      assert.equal((await bob.call("/auth/me", "PATCH", { email: "admin@example.test", currentPassword: "test-password-12345" })).status, 409);
+      assert.equal((await bob.call("/auth/me", "PATCH", { name: " " })).status, 400);
+      const login = new Client(); await login.session();
+      assert.equal((await login.call("/auth/login", "POST", { email: "new-bob@example.test", password: "test-password-12345" })).status, 200);
+      const restored = await bob.call("/auth/me", "PATCH", { name: original.name, email: original.email, phone: original.phone, currentPassword: "test-password-12345" });
+      assert.equal(restored.status, 200);
+    });
     await t.test("two roles and admin-only settings", async () => {
       assert.equal((await alice.call("/admin/products")).status, 403);
       assert.equal(
@@ -486,6 +536,33 @@ test(
         );
       },
     );
+    await t.test("older batch products, expired batch closure and transition metadata", async () => {
+      const created = await post(admin, "/admin/products", { name: "Older picker fixture", sellingType: "BATCH", status: "DRAFT", variants: [{ size: "M", color: "Black", type: "Physics", price: "85000.50" }] });
+      const p = created.product;
+      await db.product.update({ where: { id: p.id }, data: { createdAt: new Date("2020-01-01T00:00:00Z") } });
+      const filtered = await admin.call("/admin/products?type=BATCH&q=Older%20picker%20fixture");
+      assert.equal(filtered.body.products[0].id, p.id);
+      const currentMonth = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7) + "-01";
+      const dateFiltered = await admin.call(`/admin/products?type=BATCH&q=Older%20picker%20fixture&from=${currentMonth}`);
+      assert.equal(dateFiltered.body.products.length, 0);
+      const picker = await admin.call("/admin/products?scope=catalog&type=BATCH&q=Older%20picker%20fixture");
+      assert.equal(picker.body.products[0].id, p.id);
+      assert.equal((await alice.call("/admin/products?scope=catalog&type=BATCH")).status, 403);
+      assert.equal((await admin.call(`/admin/variants/${p.variants[0].id}`, "PATCH", { price: "85000.75" })).status, 200);
+      const createdBatch = await post(admin, "/admin/batches", { productId: p.id, name: "Expired fixture", status: "OPEN", opensAt: new Date(Date.now()-60000).toISOString(), closesAt: new Date(Date.now()+60000).toISOString() });
+      const expired = await db.batch.update({ where: { id: createdBatch.batch.id }, data: { opensAt: new Date("2020-01-01T00:00:00Z"), closesAt: new Date("2020-02-01T00:00:00Z") } });
+      const sameDates = { opensAt: expired.opensAt.toISOString(), closesAt: expired.closesAt.toISOString() };
+      assert.equal((await admin.call(`/admin/batches/${expired.id}`, "PATCH", { ...sameDates, status: "OPEN", announcement: "Ordering has ended" })).status, 200);
+      assert.equal((await admin.call(`/admin/batches/${expired.id}`, "PATCH", { status: "OPEN", closesAt: "2020-03-01T00:00:00Z" })).status, 400);
+      const detail = await admin.call(`/admin/batches/${expired.id}`);
+      assert.deepEqual(detail.body.batch.actions.map(a => a.status), ["CLOSED", "CANCELLED"]);
+      assert.equal((await admin.call(`/admin/batches/${expired.id}`, "PATCH", { ...sameDates, status: "CLOSED" })).status, 200);
+      assert.equal((await admin.call(`/admin/batches/${expired.id}`, "PATCH", { status: "READY" })).status, 409);
+      assert.equal((await admin.call(`/admin/batches/${expired.id}`, "PATCH", { status: "IN_PRODUCTION" })).status, 200);
+      await db.batch.delete({ where: { id: expired.id } });
+      await db.productVariant.deleteMany({ where: { productId: p.id } });
+      await db.product.delete({ where: { id: p.id } });
+    });
     await t.test(
       "batch sizes, separate names, window validation, receipts and pickup allocation",
       async () => {
@@ -1130,6 +1207,44 @@ test(
       await alice.call('/orders/'+order.body.order.id+'/cancel','POST');assert.equal((await admin.call(path,'PATCH',{type:'Chemistry'})).status,409);
       assert.equal((await alice.call('/orders/'+order.body.order.id)).body.order.items[0].itemDescription,before);
       assert.equal((await admin.call('/admin/variants/'+batchProduct.variants[0].id,'PATCH',{size:''})).status,409);
+    });
+    await t.test('independent announcements, schedules and admin authorization',async()=>{
+      const payload={title:'Campus pickup',body:'Collect at TEST location, 10:00–12:00.',published:true};
+      assert.equal((await alice.call('/admin/announcements','POST',payload)).status,403);
+      const a=(await post(admin,'/admin/announcements',payload)).announcement;
+      assert((await alice.call('/announcements')).body.announcements.some(x=>x.id===a.id));
+      await admin.call('/admin/announcements/'+a.id,'PATCH',{...payload,body:'Updated pickup time'});
+      assert.equal((await alice.call('/announcements')).body.announcements.find(x=>x.id===a.id).body,'Updated pickup time');
+      const future=(await post(admin,'/admin/announcements',{...payload,startsAt:new Date(Date.now()+3600000).toISOString()})).announcement;
+      assert(!(await alice.call('/announcements')).body.announcements.some(x=>x.id===future.id));
+      const expired=(await post(admin,'/admin/announcements',{...payload,endsAt:new Date(Date.now()-1000).toISOString()})).announcement;
+      assert(!(await alice.call('/announcements')).body.announcements.some(x=>x.id===expired.id));
+      assert.equal((await admin.call('/admin/announcements','POST',{...payload,startsAt:new Date(Date.now()+3600000).toISOString(),endsAt:new Date().toISOString()})).status,400);
+      await admin.call('/admin/announcements/'+a.id,'PATCH',{...payload,published:false});
+      assert(!(await alice.call('/announcements')).body.announcements.some(x=>x.id===a.id));
+      assert.equal((await admin.call('/admin/announcements/'+a.id,'DELETE')).status,204);
+    });
+    await t.test('non-personalized batch products, multiple open batches and reference-free approval',async()=>{
+      const p=(await post(admin,'/admin/products',{name:'Plain batch shirt',sellingType:'BATCH',embroideryRequired:false,status:'PUBLISHED',variants:[{size:'M',price:'12345.67'}]})).product;
+      assert.equal(p.embroideryRequired,false);
+      assert.equal((await admin.call("/admin/products/"+p.id,"PATCH",{name:"Plain batch shirt renamed"})).body.product.embroideryRequired,false);
+      assert.equal((await admin.call('/admin/products','POST',{name:'Invalid batch stock',sellingType:'BATCH',variants:[{size:'M',price:'1000',onHand:1}]})).status,400);
+      const window={productId:p.id,status:'OPEN',opensAt:new Date(Date.now()-1000).toISOString(),closesAt:new Date(Date.now()+86400000).toISOString()};
+      const first=(await post(admin,'/admin/batches',{...window,name:'First'})).batch;
+      const second=(await post(admin,'/admin/batches',{...window,name:'Second'})).batch;
+      const detail=(await alice.call('/products/'+p.id)).body.product;
+      assert.equal(detail.batches.length,2);
+      const batches=(await admin.call('/admin/batches?pageSize=100')).body.batches;
+      assert.equal(batches.find(b=>b.id===first.id).product.fromPrice,'12345.67');
+      const o=await createOrder(alice,p.variants[0].id,1,second.id);assert.equal(o.status,201);assert.equal(o.body.order.items[0].embroideryName,null);assert.equal(o.body.order.items[0].batchId,second.id);
+      await db.paymentMethod.update({where:{id:method.id},data:{enabled:true}});
+      const uploaded=await proof(alice,o.body.order.id);assert.equal(uploaded.status,202,JSON.stringify(uploaded.body));
+      const submission=uploaded.body.submission;
+      const approved=await admin.call('/admin/payment-submissions/'+submission.id+'/review','POST',{action:'VERIFIED'});assert.equal(approved.status,200,JSON.stringify(approved.body));
+      assert.equal((await alice.call('/orders/'+o.body.order.id)).body.order.paymentStatus,'PAID');
+      assert.equal((await admin.call('/admin/batches/'+second.id,'PATCH',{status:'CLOSED'})).status,200);
+      assert.equal((await admin.call('/admin/batches/'+second.id,'PATCH',{status:'IN_PRODUCTION'})).status,200);
+      assert.equal((await createOrder(alice,p.variants[0].id,1,first.id)).status,201);
     });
   },
 );

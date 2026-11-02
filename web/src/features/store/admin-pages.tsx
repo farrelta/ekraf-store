@@ -585,22 +585,12 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                               </Link>
                             </div>
                           </section>
-                          <section className="panel form-section">
-                            <h2>Announcement preview</h2>
-                            <p className="announcement-preview">
-                              {b.announcement || "No announcement yet."}
-                            </p>
-                            <Link
-                              className="green small"
-                              href={base + "/batches/" + b.id}
-                            >
-                              Edit announcement ↗
-                            </Link>
-                          </section>
+                          <Link className="panel form-section" href={base + "/announcements"}>Manage store announcements →</Link>
                         </div>
                       );
                     })()}
                   <div className="admin-filters">
+                    {search.toString() && <Link className="button-secondary" href={pathname}>Clear filters</Link>}
                     <form
                       className="compact-search"
                       key={pathname}
@@ -843,6 +833,7 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                           "Product",
                           "Batch",
                           "Orders",
+                          "Product price from",
                           "Order value",
                           "Deadline",
                           "Status",
@@ -858,6 +849,7 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                             {b.name}
                           </Link>,
                           b.stats.orders,
+                          b.product.fromPrice ? money(b.product.fromPrice) : "Unavailable",
                           money(b.stats.value),
                           date(b.closesAt),
                           <Badge value={b.status} />,

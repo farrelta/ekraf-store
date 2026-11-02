@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useData, useStore } from "./store-provider";
-import { StoreLayout, State, Pager, Badge, Icon } from "./ui";
+import { StoreLayout, State, Pager, Badge, Icon, CustomerSupport, PasswordInput } from "./ui";
 import {
   type Product,
   type Order,
@@ -12,6 +12,7 @@ import {
   date,
 } from "./types";
 import { jacketPhoto, keychainPhoto } from "./design-assets";
+import { AnnouncementBanner } from "./announcements";
 import { OrderCard } from "./order-card";
 
 export function ProductImage({ product }: { product: Product }) {
@@ -83,9 +84,8 @@ export function ShopPage() {
     router = useRouter(),
     pathname = usePathname();
   const { data, error, loading, reload } = useData("/api/products?" + search.toString());
-  const { data: batchData } = useData("/api/batches?pageSize=1");
-  const [dismissed, setDismissed] = useState(false);
-  const batch = batchData?.batches[0];
+  const {data: batchData} = useData("/api/batches?pageSize=1");
+  const batch=batchData?.batches[0];
   function change(key: string, value: string) {
     const next = new URLSearchParams(search.toString());
     if (value) next.set(key, value);
@@ -96,30 +96,10 @@ export function ShopPage() {
   return (
     <StoreLayout>
       <div className="store-container">
-        {batch && !dismissed && (
-          <aside className="announcement">
-            <small>BATCH ORDER OPEN</small>
-            <div>
-              <strong>{batch.product.name} — size + name embroidery</strong>
-              <span>
-                Order by {date(batch.closesAt)} · {batch.productionWeeks}{" "}
-                weeks production
-              </span>
-            </div>
-            <Link href={`/batch-orders/${batch.id}`}>
-              View batch order →
-            </Link>
-            <button
-              aria-label="Dismiss announcement"
-              onClick={() => setDismissed(true)}
-            >
-              ×
-            </button>
-          </aside>
-        )}
+        <AnnouncementBanner />
         <section className="flow-hero">
           <div className="hero-copy">
-            <small>EKRAF BEM MIPA UGM · OFFICIAL STORE</small>
+
             <h1>
               Made for
               <br />
@@ -297,18 +277,17 @@ export function ProductPage({
     ? data?.batch.product
     : data?.product;
   const batch = batchMode ? data?.batch : p?.batches[0];
-  const [selected, setSelected] = useState(""),
+  const [selectedOptions, setSelectedOptions] = useState<Partial<Record<"color" | "type" | "size", string>>>({}),
     [quantity, setQuantity] = useState(1),
     [name, setName] = useState(""),
     [review, setReview] = useState(false);
-  const variants = p?.variants.filter((v) => v.active) || [],
-    v = variants.find((v) => v.id === selected) || variants[0];
-  const isBatch = p?.sellingType === "BATCH";
+  const variants = p?.variants.filter((variant) => variant.active) || [];
   const optionFields = ["color", "type", "size"] as const;
+  const choices = Object.fromEntries(optionFields.map(field => [field, selectedOptions[field] ?? variants[0]?.[field]]));
+  const v = variants.find(variant => optionFields.every(field => variant[field] === choices[field]));
+  const isBatch = p?.sellingType === "BATCH";
   function chooseOption(field: typeof optionFields[number], value: string) {
-    const candidates = variants.filter(x => x[field] === value);
-    candidates.sort((a,b) => optionFields.reduce((score,key) => score + Number(b[key] === v?.[key]) - Number(a[key] === v?.[key]), 0));
-    if (candidates[0]) setSelected(candidates[0].id);
+    setSelectedOptions({ ...choices, [field]: value });
   }
   const open =
     batch &&
@@ -327,7 +306,7 @@ export function ProductPage({
       variantId: v.id,
       batchId: isBatch ? batch.id : null,
       quantity,
-      ...(isBatch ? { embroideryName: name.trim() } : {}),
+      ...(isBatch && p?.embroideryRequired !== false ? { embroideryName: name.trim() } : {}),
     });
     router.push("/cart");
   }
@@ -337,6 +316,7 @@ export function ProductPage({
         <State loading={loading} error={error} retry={reload}>
           {p && (
             <>
+              {isBatch && p.batches.length > 1 && <label>Choose an open batch<select aria-label="Choose an open batch" value={batch?.id || ""} onChange={e => router.push("/batch-orders/" + e.target.value)}>{p.batches.map(b => <option key={b.id} value={b.id}>{b.name} — closes {date(b.closesAt)}</option>)}</select></label>}
               <nav className="breadcrumb">
                 <Link href={isBatch ? "/?type=BATCH" : "/"}>
                   {isBatch ? "Batch Order" : "Shop"}
@@ -394,7 +374,7 @@ export function ProductPage({
                           {[v?.size,v?.color,v?.type].filter(x => x && x !== "STANDARD").join(" / ") || "Standard"}
                         </p>
                         <p>
-                          Embroidery: <strong>{name}</strong> · Quantity:{" "}
+                          {p.embroideryRequired !== false && <>Embroidery: <strong>{name}</strong> · </>}Quantity:{" "}
                           {quantity}
                         </p>
                         <p>Total: {v && money(Number(v.price) * quantity)}</p>
@@ -415,9 +395,9 @@ export function ProductPage({
                         {optionFields.map(field => {
                           const values = [...new Set(variants.map(x => x[field]))];
                           if (values.every(value => value === "STANDARD")) return null;
-                          return <fieldset key={field}><legend>{field === "type" ? "Type" : field === "color" ? "Color" : "Size"}</legend><div className="choice-row">{values.map(value => <button type="button" key={value} aria-pressed={v?.[field] === value} className={v?.[field] === value ? "choice selected" : "choice"} onClick={() => chooseOption(field,value)}>{value === "STANDARD" ? "None" : value}</button>)}</div></fieldset>;
+                          return <fieldset key={field}><legend>{field === "type" ? "Type" : field === "color" ? "Color" : "Size"}</legend><div className="choice-row">{values.map(value => <button type="button" key={value} aria-pressed={choices[field] === value} className={choices[field] === value ? "choice selected" : "choice"} onClick={() => chooseOption(field,value)}>{value === "STANDARD" ? "None" : value}</button>)}</div></fieldset>;
                         })}
-                        {isBatch && (
+                        {isBatch && p.embroideryRequired !== false && (
                           <>
                             <label>
                               Name for embroidery
@@ -474,6 +454,8 @@ export function ProductPage({
                         )}
                       </>
                     )}
+                    {!v && variants.length > 0 && <p role="status">This combination is not offered. Change a color, type, or size; your other selections have been kept.</p>}
+                    {!isBatch && v && <p role="status">{available > 0 ? `${available} available for this option.` : "This option is sold out. Choose another combination."}</p>}
                     <button
                       className="button-primary full-width"
                       disabled={
@@ -517,7 +499,7 @@ export function ProductPage({
                   </p>
                   <div className="detail-assurance">
                     <span>Size and color availability varies by variant.</span>
-                    <span>Collect on campus after payment verification.</span>
+                    <span>EKRAF will arrange your campus pickup location and time via WhatsApp after payment verification.</span>
                   </div>
                 </section>
               )}
@@ -541,6 +523,7 @@ export function CartPage() {
       checkoutKey,
       completeCheckout,
       invalidateCheckout,
+      refreshAuth,
     } = useStore(),
     router = useRouter();
   const ids = [...new Set(cart.map((l) => l.variantId))].join(",");
@@ -548,9 +531,13 @@ export function CartPage() {
     cart.length ? "/api/cart/variants?ids=" + encodeURIComponent(ids) : null,
   );
   const [plan, setPlan] = useState("FULL"),
-    [phone, setPhone] = useState(""),
     [busy, setBusy] = useState(false);
   const variants = data?.variants || [];
+  const requested = (variantId: string) => cart.filter(line => line.variantId === variantId).reduce((sum, line) => sum + line.quantity, 0);
+  const stockIssue = cart.some(line => {
+    const variant = variants.find((item: any) => item.id === line.variantId);
+    return !variant || (!line.batchId && requested(line.variantId) > variant.onHand - variant.reserved);
+  });
   const sum = (batchOnly = false) =>
     cart.reduce(
       (sum, l) =>
@@ -572,7 +559,8 @@ export function CartPage() {
         : subtotal;
   async function checkout(e: FormEvent) {
     e.preventDefault();
-    if (!user) return;
+    if (!user?.phone) return;
+    if (stockIssue) { report("Update or remove unavailable cart items before continuing."); return; }
     setBusy(true);
     try {
       const result = await api("/api/orders", {
@@ -580,7 +568,7 @@ export function CartPage() {
         headers: { "Idempotency-Key": checkoutKey() },
         body: JSON.stringify({
           customerName: user.name,
-          customerPhone: phone,
+          customerPhone: user.phone,
           paymentPlan: batchTotal ? plan : "FULL",
           items: cart.map(
             ({ variantId, batchId, quantity, embroideryName }) => ({
@@ -621,6 +609,8 @@ export function CartPage() {
               <section className="panel cart-items">
                 {cart.map((line) => {
                   const v = variants.find((v: any) => v.id === line.variantId);
+                  const available = v ? Math.max(0, v.onHand - v.reserved) : 0;
+                  const limit = line.batchId ? 100 : Math.max(0, Math.min(100, available - (requested(line.variantId) - line.quantity)));
                   return (
                     <article className="cart-item" key={line.id}>
                       <div className="cart-photo">
@@ -647,7 +637,7 @@ export function CartPage() {
                           <input
                             type="number"
                             min="1"
-                            max="100"
+                            max={limit}
                             disabled={busy}
                             value={line.quantity}
                             onChange={(e) =>
@@ -655,6 +645,8 @@ export function CartPage() {
                             }
                           />
                         </label>
+                        {!line.batchId && v && <p role="status">{requested(line.variantId) > available ? `Only ${available} available across your cart. Reduce the quantity or remove this item.` : `${available} available.`}</p>}
+                        {!v && <p role="status">This item is no longer available. Remove it to continue.</p>}
                         <button
                           disabled={busy}
                           className="text-link"
@@ -728,30 +720,12 @@ export function CartPage() {
                         verified before batch pickup.
                       </p>
                     )}
-                    <label>
-                      Name
-                      <input value={user.name} readOnly />
-                    </label>
-                    <label>
-                      WhatsApp / phone number
-                      <input
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        minLength={6}
-                        maxLength={30}
-                        required
-                        autoComplete="tel"
-                      />
-                    </label>
+                    <dl className="contact-summary"><div><dt>Name</dt><dd>{user.name}</dd></div><div><dt>WhatsApp / phone</dt><dd>{user.phone || "Not provided"}</dd></div></dl>
+                    <p className="muted">You can change your contact details only on the <Link className="text-link" href="/account">Account page</Link>. {!user.phone && "Add your phone number before checkout."}</p>
                     <button
                       className="button-primary full-width"
                       disabled={
-                        busy ||
-                        cart.some(
-                          (l) =>
-                            !variants.some((v: any) => v.id === l.variantId),
-                        )
+                        busy || stockIssue || !user.phone
                       }
                     >
                       {busy ? "Creating order…" : "Continue to payment"}
@@ -759,19 +733,20 @@ export function CartPage() {
                   </form>
                 ) : (
                   <>
-                    <p>Sign in to reserve your items and pay.</p>
+                    <p>An account is required to place your order. Your name and WhatsApp number are saved for future checkouts.</p>
                     <Link
                       className="button-primary full-width"
                       href="/sign-in?next=/cart"
                     >
                       Sign in to checkout
                     </Link>
+                    <Link className="text-link" href="/register?next=/cart">Create an account</Link>
                   </>
                 )}
                 <p className="muted">
-                  Ready merchandise can be collected separately from batch
-                  pieces.
+                  Ready merchandise can be collected separately from batch pieces. EKRAF will arrange the campus pickup location and time with you via WhatsApp.
                 </p>
+                <CustomerSupport />
               </aside>
             </div>
           </State>
@@ -795,6 +770,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
         method: "POST",
         body: JSON.stringify({
           name: form.get("name"),
+          ...(register ? { phone: form.get("phone") } : {}),
           email: form.get("email"),
           password: form.get("password"),
         }),
@@ -831,15 +807,22 @@ export function AuthPage({ register = false }: { register?: boolean }) {
               />
             </label>
           )}
+          {register && <>
+          <label>
+            WhatsApp / phone number
+            <input name="phone" aria-describedby="registration-phone-help" type="tel" autoComplete="tel" required minLength={6} maxLength={30}
+              pattern="[+]?[0-9][0-9 \(\)\-]{5,29}" placeholder="+62 812 3456 7890" />
+          </label>
+          <small id="registration-phone-help">Used for your orders and campus pickup arrangements.</small>
+          </>}
           <label>
             Email
             <input name="email" type="email" autoComplete="email" required />
           </label>
           <label>
             Password
-            <input
+            <PasswordInput
               name="password"
-              type="password"
               minLength={register ? 12 : 1}
               maxLength={128}
               autoComplete={register ? "new-password" : "current-password"}

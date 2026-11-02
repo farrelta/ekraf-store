@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
-import { allocateBatch, expireOrders, fail, move, orderDto, orderInclude, quantities, releaseOrder, total, transaction, paymentSummary } from "./store-service.js";
+import { batchTransitions, allocateBatch, expireOrders, fail, move, orderDto, orderInclude, quantities, releaseOrder, total, transaction, paymentSummary } from "./store-service.js";
 import { canTransitionFulfillment } from "./order-policy.js";
 import { registerQueryRoutes } from "./store-queries.js";
 import { catalogOptions, createWithSkus, optionSchema } from "./catalog.js";
@@ -14,7 +14,7 @@ const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
 const image = z.string().url().max(2048).refine(v => v.startsWith("https://"), "Use an HTTPS image URL").nullable().optional();
 const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, type: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
-const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false) });
+const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false), embroideryRequired: z.boolean().default(true) });
 const productInclude = { variants: { orderBy: { sku: "asc" as const } }, batches: { orderBy: { closesAt: "desc" as const } } };
 const receiptDirectory = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
 const normalizeVariant = (v: z.output<typeof variantSchema> & { sku: string }) => ({ ...v, price: new Prisma.Decimal(v.price) });
@@ -22,6 +22,15 @@ const normalizeVariant = (v: z.output<typeof variantSchema> & { sku: string }) =
 export function registerStoreRoutes(app: Express, db: PrismaClient, auth: RequestHandler, admin: RequestHandler) {
   app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
   registerQueryRoutes(app, db, auth, admin);
+  const announcementSchema = z.object({ title: text, body: z.string().trim().min(1).max(10000), published: z.boolean().default(false), startsAt: z.iso.datetime().nullable().default(null), endsAt: z.iso.datetime().nullable().default(null) }).refine(v => !v.startsAt || !v.endsAt || new Date(v.startsAt) < new Date(v.endsAt), "End must follow start");
+  app.get("/api/announcements", async (_req,res) => {
+    const now=new Date();
+    res.json({announcements:await db.announcement.findMany({where:{published:true,AND:[{OR:[{startsAt:null},{startsAt:{lte:now}}]},{OR:[{endsAt:null},{endsAt:{gt:now}}]}]},orderBy:[{createdAt:"desc"},{id:"asc"}]})});
+  });
+  app.get("/api/admin/announcements",admin,async (_req,res)=>res.json({announcements:await db.announcement.findMany({orderBy:{createdAt:"desc"}})}));
+  app.post("/api/admin/announcements",admin,async(req,res)=>res.status(201).json({announcement:await db.announcement.create({data:announcementSchema.parse(req.body)})}));
+  app.patch("/api/admin/announcements/:id",admin,async(req,res)=>res.json({announcement:await db.announcement.update({where:{id:param(req,"id")},data:announcementSchema.parse(req.body)})}));
+  app.delete("/api/admin/announcements/:id",admin,async(req,res)=>{await db.announcement.delete({where:{id:param(req,"id")}});res.status(204).end();});
   app.get("/api/admin/catalog-options", admin, (_req, res) => res.json(catalogOptions));
   app.post("/api/admin/products", admin, async (req, res) => {
     const { variants, ...data } = productFields.extend({ variants: z.array(variantSchema).min(1).max(100) }).parse(req.body);
@@ -37,7 +46,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     res.status(201).json({ product });
   });
   app.patch("/api/admin/products/:id", admin, async (req, res) => {
-    const data = productFields.omit({ sellingType: true }).partial().parse(req.body);
+    const data = productFields.omit({ sellingType: true }).partial().extend({ description: z.string().max(5000).optional(), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(), featured: z.boolean().optional(), embroideryRequired: z.boolean().optional() }).parse(req.body);
     const product = await db.product.update({ where: { id: param(req, "id") }, data, include: productInclude });
     res.json({ product });
   });
@@ -88,7 +97,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     res.status(204).end();
   });
   app.patch("/api/admin/variants/:id", admin, async (req, res) => {
-    const data = z.object({ price: money.optional(), active: z.boolean().optional(), size: optionSchema.optional(), color: optionSchema.optional(), type: optionSchema.optional() }).parse(req.body);
+    const data = z.object({ price: money.optional(), active: z.boolean().optional(), size: optionSchema.removeDefault().optional(), color: optionSchema.removeDefault().optional(), type: optionSchema.removeDefault().optional() }).parse(req.body);
     const variant = await transaction(db, async tx => {
       const current = await tx.productVariant.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { product: true } });
       await tx.product.update({ where: { id: current.productId }, data: { updatedAt: new Date() } });
@@ -126,14 +135,15 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     const data = z.object({ status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional(), opensAt: z.iso.datetime().optional(), closesAt: z.iso.datetime().optional(), productionWeeks: z.number().int().min(1).max(52).optional() }).parse(req.body);
     const batch = await transaction(db, async tx => {
       const current = await tx.batch.findUniqueOrThrow({ where: { id: param(req, "id") } });
-      if (data.opensAt || data.closesAt) {
+      const windowChanged = (data.opensAt !== undefined && new Date(data.opensAt).getTime() !== current.opensAt.getTime()) ||
+        (data.closesAt !== undefined && new Date(data.closesAt).getTime() !== current.closesAt.getTime());
+      if (windowChanged) {
         if (!["DRAFT","OPEN"].includes(current.status)) fail("Dates can only change while draft or open");
         const opens = new Date(data.opensAt ?? current.opensAt), closes = new Date(data.closesAt ?? current.closesAt);
         if (opens >= closes || closes <= new Date()) fail("Choose a valid window with a future closing date",400);
       }
-      const paths: Record<string, string[]> = { DRAFT: ["OPEN", "CANCELLED"], OPEN: ["CLOSED", "CANCELLED"], CLOSED: ["IN_PRODUCTION", "CANCELLED"], IN_PRODUCTION: ["READY"], READY: ["COMPLETED"] };
-      if (data.status && data.status !== current.status && !paths[current.status]?.includes(data.status)) fail("Invalid batch transition");
-      if (data.status === "OPEN" && new Date(data.closesAt ?? current.closesAt) <= new Date()) fail("Choose a future closing date before opening the batch", 400);
+      if (data.status && data.status !== current.status && !batchTransitions[current.status]?.includes(data.status)) fail("Invalid batch transition");
+      if (data.status === "OPEN" && current.status !== "OPEN" && new Date(data.closesAt ?? current.closesAt) <= new Date()) fail("Choose a future closing date before opening the batch", 400);
       if (data.status === "CANCELLED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID", "PENDING"] } } } })) fail("Resolve existing orders before cancelling a batch");
       if (data.status === "COMPLETED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID"] } }, pickupStatus: { not: "COMPLETED" } } })) fail("Orders still await pickup");
       return tx.batch.update({ where: { id: current.id }, data });
@@ -181,7 +191,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
         const v = await tx.productVariant.findUniqueOrThrow({ where: { id: item.variantId }, include: { product: true } });
         if (!v.active || v.product.status !== "PUBLISHED") fail("A selected variant is unavailable");
         if (batch ? v.productId !== batch.productId || v.product.sellingType !== "BATCH" : v.product.sellingType !== "CONTINUOUS") fail("Select a valid batch for every batch product, and no batch for merchandise", 400);
-        if (batch ? !item.embroideryName || v.size === "STANDARD" : !!item.embroideryName) fail("Batch items require a preset size and embroidery name; continuous items have no embroidery", 400);
+        if (batch ? v.size === "STANDARD" || (v.product.embroideryRequired && !item.embroideryName) || (!v.product.embroideryRequired && !!item.embroideryName) : !!item.embroideryName) fail("Choose a preset batch size and provide an embroidery name only when offered", 400);
         lines.push({ batchId: batch?.id ?? null, variantId: v.id, quantity: item.quantity, embroideryName: item.embroideryName ?? null, itemDescription: `${v.product.name} · ${[v.size,v.color,v.type].filter(x => x !== "STANDARD").join(" / ") || "Standard"} · ${v.sku}`, unitPrice: v.price });
       }
       const continuous = total(lines.filter(i => !i.batchId));
@@ -241,13 +251,13 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   });
   app.post("/api/admin/payment-submissions/:id/review", admin, async (req, res) => {
     const data = z.object({ action: z.enum(["VERIFIED", "REJECTED"]), reason: z.string().trim().max(1000).default(""), reference: z.string().trim().max(200).default("") }).parse(req.body);
-    if (data.action === "REJECTED" ? !data.reason : !data.reference) fail("Provide a rejection reason or verified merchant reference", 400);
+    if (data.action === "REJECTED" && !data.reason) fail("Provide a rejection reason", 400);
     await transaction(db, async tx => {
       const s = await tx.paymentSubmission.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { order: { include: orderInclude } } });
       if (s.status !== "SUBMITTED" || !["PENDING", "PARTIALLY_PAID"].includes(s.order.paymentStatus)) fail("This payment was already reviewed");
       const due = paymentSummary(s.order);
       if (s.phase !== due.phase || !s.amount.equals(due.amountDue)) fail("Payment amount does not match the required installment");
-      await tx.paymentSubmission.update({ where: { id: s.id }, data: { status: data.action, reviewedBy: req.session.userId, reviewedAt: new Date(), reviewReason: data.reason || null, ...(data.action === "VERIFIED" ? { transactionReference: data.reference } : {}) } });
+      await tx.paymentSubmission.update({ where: { id: s.id }, data: { status: data.action, reviewedBy: req.session.userId, reviewedAt: new Date(), reviewReason: data.reason || null, ...(data.action === "VERIFIED" ? { transactionReference: data.reference || null } : {}) } });
       if (data.action === "REJECTED") {
         if (s.order.paymentStatus === "PENDING" && s.order.expiresAt <= new Date()) await releaseOrder(tx, s.orderId, "EXPIRED", req.session.userId);
         return;

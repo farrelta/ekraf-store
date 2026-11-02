@@ -1,7 +1,7 @@
 import type { Express, Request, Response, RequestHandler } from "express";
 import { z } from "zod";
 import { Prisma, PrismaClient } from "./generated/prisma/client.js";
-import { fail, orderDto, orderInclude } from "./store-service.js";
+import { batchTransitions, fail, orderDto, orderInclude } from "./store-service.js";
 
 const id = (req: Request) => String(req.params.id ?? "");
 export const pageSchema = z.object({
@@ -103,6 +103,7 @@ export function registerQueryRoutes(
       const q = pageSchema
         .extend({
           search: z.string().trim().max(100).optional(),
+          scope: z.enum(["catalog"]).optional(),
           type: z.enum(["CONTINUOUS", "BATCH"]).optional(),
           status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
           category: z.string().max(160).optional(),
@@ -112,7 +113,7 @@ export function registerQueryRoutes(
           stock: z.enum(["low", "sold_out"]).optional(),
         })
         .parse(req.query);
-      const r = dateRange(q.from, q.to, isAdmin),
+      const r = isAdmin && q.scope === "catalog" ? dateRange() : dateRange(q.from, q.to),
         search = q.search ?? q.q;
       const base = Prisma.sql`WHERE true ${!isAdmin ? Prisma.sql`AND p.status='PUBLISHED'` : Prisma.empty} ${dates(Prisma.sql`p.created_at`, r)}`;
       const where = Prisma.sql`${base} ${search ? Prisma.sql`AND p.name ILIKE ${"%" + search + "%"}` : Prisma.empty} ${q.type ? Prisma.sql`AND p.selling_type::text=${q.type}` : Prisma.empty} ${q.status && isAdmin ? Prisma.sql`AND p.status::text=${q.status}` : Prisma.empty} ${q.category ? Prisma.sql`AND p.category=${q.category}` : Prisma.empty} ${q.stock ? Prisma.sql`AND p.selling_type='CONTINUOUS' AND stock.available ${q.stock === "low" ? Prisma.sql`BETWEEN 1 AND 5` : Prisma.sql`=0`}` : Prisma.empty}`;
@@ -339,7 +340,18 @@ export function registerQueryRoutes(
         },
       });
       if (!b) return fail("Batch not found", 404);
-      res.json({ batch: { ...b, product: productDto(b.product) } });
+      let actions: { status: string; blockedReason: string | null }[] | undefined;
+      if (isAdmin) {
+        const [activeOrders, pendingPickups] = await Promise.all([
+          db.orderItem.count({ where: { batchId: b.id, order: { paymentStatus: { in: ["PENDING", "PARTIALLY_PAID", "PAID"] } } } }),
+          db.orderItem.count({ where: { batchId: b.id, order: { paymentStatus: { in: ["PARTIALLY_PAID", "PAID"] } }, pickupStatus: { not: "COMPLETED" } } }),
+        ]);
+        actions = (batchTransitions[b.status] || []).map(status => ({ status,
+          blockedReason: status === "CANCELLED" && activeOrders > 0 ? "Resolve existing orders before cancelling this batch." :
+            status === "COMPLETED" && pendingPickups > 0 ? "Some paid items still await pickup." : null,
+        }));
+      }
+      res.json({ batch: { ...b, product: productDto(b.product), ...(isAdmin ? { actions } : {}) } });
     };
   app.get("/api/batches/:id", batchDetail(false));
   app.get("/api/admin/batches/:id", admin, batchDetail(true));

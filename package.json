@@ -1,7 +1,10 @@
 {
   "name": "mipa-store",
   "private": true,
-  "workspaces": ["api", "web"],
+  "workspaces": [
+    "api",
+    "web"
+  ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm --workspace api run dev",
@@ -10,8 +13,18 @@
     "test": "npm test --workspace api",
     "db:migrate": "npm --workspace api run db:migrate",
     "db:generate": "npm --workspace api run db:generate",
-    "db:check": "npm --workspace api run db:check"
+    "db:check": "npm --workspace api run db:check",
+    "e2e:prepare": "npm run build --workspace api && node scripts/e2e.mjs prepare",
+    "e2e:start": "node scripts/e2e.mjs start",
+    "e2e:dev": "node scripts/e2e.mjs dev",
+    "e2e:stop": "node scripts/e2e.mjs stop",
+    "e2e:info": "node scripts/e2e.mjs info",
+    "e2e:check": "node scripts/e2e.mjs check"
   },
-  "devDependencies": { "concurrently": "^9.2.1" },
-  "engines": { "node": ">=24.11" }
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=24.11"
+  }
 }

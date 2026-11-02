@@ -20,6 +20,8 @@ const config = z.object({
   SESSION_SECRET: z.string().min(32),
   FRONTEND_ORIGIN: z.string().url().default("http://localhost:5173"),
   API_PORT: z.coerce.number().int().positive().default(3000),
+  API_HOST: z.string().default("0.0.0.0"),
+  SESSION_COOKIE_NAME: z.string().regex(/^[A-Za-z0-9._-]+$/).default("mipa.sid"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   ALLOW_ADMIN_BOOTSTRAP: z.string().default("false"),
   ADMIN_BOOTSTRAP_TOKEN: z.string().optional()
@@ -41,7 +43,7 @@ app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.h
 app.use(express.json({ limit: "64kb" }));
 app.use(session({
   store: new PgStore({ pool, createTableIfMissing: false }),
-  name: "mipa.sid", secret: config.SESSION_SECRET, resave: false, saveUninitialized: false,
+  name: config.SESSION_COOKIE_NAME, secret: config.SESSION_SECRET, resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, secure: config.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
@@ -82,10 +84,11 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+const phoneSchema = z.string().trim().min(6).max(30).regex(/^\+?[0-9][0-9 ()-]{5,29}$/, "Enter a valid phone number with country code");
 const accountSchema = z.object({ name: z.string().trim().min(2).max(100), email: z.string().trim().email().max(254).transform(v => v.toLowerCase()), password: z.string().min(12).max(128) });
 app.post("/api/auth/register", authLimiter, async (req, res) => {
-  const input = parse(accountSchema, req.body);
-  const user = await prisma.user.create({ data: { name: input.name, email: input.email, passwordHash: await argon2.hash(input.password, { type: argon2.argon2id }) }, select: { id: true, name: true, email: true, role: true } });
+  const input = parse(accountSchema.extend({ phone: phoneSchema }), req.body);
+  const user = await prisma.user.create({ data: { name: input.name, email: input.email, phone: input.phone, passwordHash: await argon2.hash(input.password, { type: argon2.argon2id }) }, select: { id: true, name: true, email: true, phone: true, role: true } });
   await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
   req.session.userId = user.id; req.session.role = user.role;
   res.status(201).json({ user });
@@ -96,7 +99,7 @@ app.post("/api/auth/login", authLimiter, async (req, res) => {
   if (!user || !(await argon2.verify(user.passwordHash, input.password))) return res.status(401).json({ error: "Invalid email or password" });
   await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
   req.session.userId = user.id; req.session.role = user.role;
-  res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  res.json({ user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role } });
 });
 app.post("/api/admin/login", authLimiter, async (req, res) => {
   const input = parse(z.object({ email: z.string().email().transform(v => v.toLowerCase()), password: z.string().min(1).max(128) }), req.body);
@@ -104,16 +107,37 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   if (!user || user.role !== "ADMIN" || !(await argon2.verify(user.passwordHash, input.password))) return res.status(401).json({ error: "Invalid email or password" });
   await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
   req.session.userId = user.id; req.session.role = user.role;
-  res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  res.json({ user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role } });
 });
 app.post("/api/auth/logout", requireUser, async (req, res) => {
   await new Promise<void>((resolve, reject) => req.session.destroy(err => err ? reject(err) : resolve()));
-  res.clearCookie("mipa.sid"); res.status(204).end();
+  res.clearCookie(config.SESSION_COOKIE_NAME); res.status(204).end();
 });
 app.get("/api/auth/me", async (req, res) => {
   if (!req.session.userId) return res.json({ user: null });
-  const user = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { id: true, name: true, email: true, role: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { id: true, name: true, email: true, phone: true, role: true } });
   res.json({ user });
+});
+
+app.patch("/api/auth/me", requireUser, rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }), async (req, res) => {
+  const data = accountSchema.pick({ name: true, email: true }).extend({ phone: phoneSchema, currentPassword: z.string().min(1).max(128) }).partial()
+    .refine(value => value.name !== undefined || value.email !== undefined || value.phone !== undefined, "Provide account details to update").parse(req.body);
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.session.userId! } });
+  if (data.email !== undefined && data.email !== current.email) {
+    if (!data.currentPassword || !await argon2.verify(current.passwordHash, data.currentPassword))
+      return res.status(400).json({ error: "Enter your current password to change your email address." });
+  }
+  const { currentPassword: _password, ...changes } = data;
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.session.userId! }, data: changes,
+      select: { id: true, name: true, email: true, phone: true, role: true },
+    });
+    res.json({ user });
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return res.status(409).json({ error: "This email address is already in use." });
+    throw error;
+  }
 });
 
 app.post("/api/admin/bootstrap", authLimiter, async (req, res) => {
@@ -123,7 +147,7 @@ app.post("/api/admin/bootstrap", authLimiter, async (req, res) => {
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return res.status(403).json({ error: "Invalid bootstrap token" });
   if (await prisma.user.count({ where: { role: "ADMIN" } })) return res.status(409).json({ error: "An administrator already exists" });
   const input = parse(accountSchema, req.body);
-  const user = await prisma.user.create({ data: { name: input.name, email: input.email, passwordHash: await argon2.hash(input.password, { type: argon2.argon2id }), role: "ADMIN" }, select: { id: true, name: true, email: true, role: true } });
+  const user = await prisma.user.create({ data: { name: input.name, email: input.email, passwordHash: await argon2.hash(input.password, { type: argon2.argon2id }), role: "ADMIN" }, select: { id: true, name: true, email: true, phone: true, role: true } });
   res.status(201).json({ user });
 });
 
@@ -142,7 +166,7 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 app.use(errorHandler);
 
 
-const server = app.listen(config.API_PORT, () => console.log(`API listening on ${config.API_PORT}`));
+const server = app.listen(config.API_PORT, config.API_HOST, () => console.log(`API listening on ${config.API_PORT}`));
 let expiring = false;
 const expiryTimer = setInterval(() => {
   if (expiring) return;

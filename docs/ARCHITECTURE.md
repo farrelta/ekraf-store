@@ -1,19 +1,38 @@
 # Architecture
 
-Next.js App Router renders the storefront, account orders, and an on-demand admin workspace. Express handles cookie authentication, CSRF checks, authorization, catalog management, checkout, receipt review and pickup. PostgreSQL 17 with Prisma 7 is the source of truth.
+Next.js App Router provides the customer store and private admin panel. Express handles authentication, authorization, validation, checkout, payments, inventory, and pickup. PostgreSQL 17 through Prisma 7 is the source of truth.
 
-- `api/src/index.ts`: application configuration, sessions, authentication, role checks, error handling and worker lifecycle.
-- `api/src/store-routes.ts`: validated store/admin HTTP interfaces and private receipt access.
-- `api/src/store-queries.ts`: paginated catalogs, operational reporting, dashboard calculations and safe CSV exports.
-- `api/src/store-service.ts`: serializable transaction retries, order totals, inventory movements, batch allocation and expiry.
-- `web/src/features/store`: storefront, typed display data, order/payment forms and separately loaded admin tools.
+## Code map
 
-There are nine application tables, plus session and migration infrastructure tables. Prisma uses camelCase in TypeScript and snake_case physical table/column mappings. The importable diagram is `docs/schema.dbml`.
+| Location | Responsibility |
+| --- | --- |
+| `api/src/index.ts` | Configuration, PostgreSQL sessions, authentication, roles, CSRF, errors, expiry worker. |
+| `api/src/store-routes.ts` | Catalog mutations, orders, private proof uploads/review, stock, pickup, announcements. |
+| `api/src/store-queries.ts` | Detail/list queries, pagination, reporting, dashboard, CSV exports. |
+| `api/src/store-service.ts` | Serializable transactions/retries, totals, ledger changes, allocation, expiry. |
+| `api/prisma/schema.prisma` | Authoritative data model; committed migrations preserve the deployment chain. |
+| `web/src/features/store/store-provider.tsx` | Authentication, CSRF, notifications, persistent cart, checkout idempotency. |
+| `web/src/features/store/store-pages.tsx`, `order-card.tsx` | Customer catalog, customization, checkout, order/payment views. |
+| `web/src/features/store/admin-*.tsx` | Admin layout, lists, reports, and editors. |
+| `web/src/features/store/announcements.tsx`, `account-page.tsx` | Announcements and account management. |
+| `web/src/flowstep.css`, `admin.css`, `responsive.css` | Shared storefront, admin, and responsive presentation. |
 
-Only CUSTOMER and ADMIN exist. Every privileged request reloads the role from the database. Registration always creates a customer. Admins manage products/batches/payment methods and verify payments. Owners can access their orders and private receipt images. Admins sign in through a dedicated, server-configured private panel URL; the public store has no admin navigation.
+## Routes and state
 
-The browser never chooses prices, totals, stock changes, reviewers or payment decisions. Checkout uses UUID idempotency keys; concurrent stock changes run in serializable transactions with bounded retries. Stock history is append-only. Approved/rejected payment evidence is immutable. One-minute expiry skips receipts awaiting review. Batch receipts are allocated separately by production window.
+Customer routes: `/`, `/products/[id]`, `/batch-orders/[id]`, `/cart`, `/orders`, `/orders/[id]`, `/orders/[id]/payment`, `/account`, `/announcements`, `/about`, `/sign-in`, `/register`. `/batch-orders` redirects to the store's batch collection.
 
-Payment receipts use persistent private local disk storage in this initial version. Multi-host deployment needs shared private storage or an object-store implementation. Product and QRIS images use approved HTTPS URLs. The app has no payment gateway, shipping integration, general audit log, product review system or automated refunds.
+The `ADMIN_PANEL_PATH` layout validates the private segment for every nested route. Sections are dashboard, orders, payments, products, batches, customers, announcements, and settings. Every admin API independently requires ADMIN. Receipts require their owner or ADMIN.
 
-See [Flowstep implementation](FLOWSTEP.md) for the dedicated page routes, responsive layouts, query filters, date definitions, migration rehearsal, and browser validation workflow.
+Cart and checkout keys persist under `ekraf:cart:v3` and `ekraf:checkout:v3`. Checkout stores a UUID before submission so retries reuse it. Changing cart contents/payment plan invalidates it; successful checkout clears it. List filters and pagination stay in URLs.
+
+The visual reference originated from Flowstep's customer/admin screens. Existing local merchandise artwork and campus doodle are the current visual assets; catalog imagery comes from actual product image URLs. The app uses real data and explicit empty/loading/error states.
+
+## Query and reporting conventions
+
+Lists retain their array fields and add pagination, summaries, and effective date ranges. Default page size is 20; requests above 100 are rejected. CSV exports include all matching rows and escape spreadsheet formulas.
+
+Public lists default to all dates. Admin Products also defaults to all dates; other admin reporting defaults to the current Jakarta month through today. Explicit end dates include the full Asia/Jakarta day, with ranges limited to 366 days. Catalog/batch/order/customer filters use record creation; submission queues use submission dates; dashboard revenue uses verification dates.
+
+Summary cards use the date range before search/status filtering. Operational pending proofs, closing batches, and low stock describe current work. Dashboard revenue sums VERIFIED deposits and balances once each. Comparisons use the preceding equally sized period; a zero baseline is neutral. Customer spending uses verified money; repeat buyers have at least two PAID/PARTIALLY_PAID orders; average order value uses full historical totals.
+
+The browser never sets trusted prices, totals, stock changes, reviewers, or payment decisions. See [Database](DATABASE.md) for business invariants and [Operations](OPERATIONS.md) for deployment/security limits.
