@@ -51,7 +51,7 @@ with sync_playwright() as p:
     expect(page.locator(".contact-summary")).to_contain_text("Campus Shopper")
     expect(page.locator(".contact-summary")).to_contain_text("+62 812 3456 7890")
     page.get_by_role("button",name="Continue to payment").click()
-    expect(page.locator(".notice")).to_contain_text("Fixture stops")
+    expect(page.locator(".form-error-summary")).to_contain_text("Fixture stops")
     assert state["updates"] == 0
     state["user"]["phone"] = None
     page.reload()

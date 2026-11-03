@@ -27,6 +27,8 @@ Cart and checkout keys persist under `ekraf:cart:v3` and `ekraf:checkout:v3`. Ch
 
 The visual reference originated from Flowstep's customer/admin screens. Existing local merchandise artwork and campus doodle are the current visual assets; catalog imagery comes from actual product image URLs. The app uses real data and explicit empty/loading/error states.
 
+Local hero photographs use Next.js responsive image delivery with intrinsic dimensions. Both load eagerly; the jacket gets high fetch priority. Catalog images retain their supplied HTTPS URLs and load lazily, while the primary product-detail photo loads eagerly. Collection and announcement placeholders reserve space during initial loading. Admin announcement editing lives in its own module so customer pages do not import the product/variant forms. The API callback stays stable across session refreshes and reads the latest CSRF token when sending a mutation.
+
 ## Query and reporting conventions
 
 Lists retain their array fields and add pagination, summaries, and effective date ranges. Default page size is 20; requests above 100 are rejected. CSV exports include all matching rows and escape spreadsheet formulas.

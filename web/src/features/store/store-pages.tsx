@@ -1,7 +1,10 @@
 "use client";
+import { FormFeedback, FieldError } from "./form-feedback";
+import { openBatches, isBatchOpen } from "./batch-window";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useData, useStore } from "./store-provider";
 import { StoreLayout, State, Pager, Badge, Icon, CustomerSupport, PasswordInput } from "./ui";
 import {
@@ -15,11 +18,15 @@ import { jacketPhoto, keychainPhoto } from "./design-assets";
 import { AnnouncementBanner } from "./announcements";
 import { OrderCard } from "./order-card";
 
-export function ProductImage({ product }: { product: Product }) {
-  return product.imageKey ? (
+export function ProductImage({ product, loading = "lazy" }: { product: Product; loading?: "eager" | "lazy" }) {
+  const [failedSource,setFailedSource]=useState<string|null>(null);
+  return product.imageKey && failedSource !== product.imageKey ? (
     <img
       src={product.imageKey}
+      loading={loading}
+      decoding="async"
       alt={product.name}
+      onError={()=>setFailedSource(product.imageKey)}
       referrerPolicy="no-referrer"
     />
   ) : (
@@ -34,7 +41,7 @@ const price = (p: Product) =>
     .filter((v) => v.active)
     .reduce((min, v) => Math.min(min, Number(v.price)), Infinity);
 function ProductTile({ product: p }: { product: Product }) {
-  const batch = p.batches[0],
+  const batch = openBatches(p.batches)[0],
     available = p.variants.reduce((n, v) => n + v.onHand - v.reserved, 0);
   const href =
     p.sellingType === "BATCH" && batch
@@ -95,7 +102,7 @@ export function ShopPage() {
   }
   return (
     <StoreLayout>
-      <div className="store-container">
+      <div className="store-container shop-container">
         <AnnouncementBanner />
         <section className="flow-hero">
           <div className="hero-copy">
@@ -120,11 +127,11 @@ export function ShopPage() {
           </div>
           <div className="hero-photos">
             <figure className="hero-tee">
-              <img src={keychainPhoto} alt="MIPA department mascot keychains" />
+              <Image src={keychainPhoto} width={1836} height={2304} sizes="(max-width: 767px) 31vw, (max-width: 1280px) 16vw, 210px" loading="eager" alt="MIPA department mascot keychains" />
               <figcaption>MIPA keychains</figcaption>
             </figure>
             <figure className="hero-jacket">
-              <img src={jacketPhoto} alt="FMIPA UGM faculty jacket, front and back" />
+              <Image src={jacketPhoto} width={817} height={876} sizes="(max-width: 767px) 41vw, (max-width: 1280px) 22vw, 280px" loading="eager" fetchPriority="high" alt="FMIPA UGM faculty jacket, front and back" />
               <figcaption>Faculty collection</figcaption>
             </figure>
             {batch && (
@@ -143,7 +150,7 @@ export function ShopPage() {
               <small className="eyebrow">
                 COLLECTION
               </small>
-              <h1>Shop the collection</h1>
+              <h2>Shop the collection</h2>
             </div>
             <form
               className="compact-search"
@@ -206,7 +213,14 @@ export function ShopPage() {
               )}
             </div>
           </div>
-          <State loading={loading} error={error} retry={reload}>
+          <State loading={loading} error={error} retry={reload} fallback={
+            <div role="status" aria-label="Loading collection">
+              <span className="sr-only">Loading collection…</span>
+              <div className="product-grid" aria-hidden="true">
+                {Array.from({ length: 6 }, (_, i) => <div className="product-loading" key={i}><div className="tile-image"/><div className="loading-line"/><div className="loading-line"/></div>)}
+              </div>
+            </div>
+          }>
             {data?.products.length ? (
               <div className="product-grid">
                 {data.products.map((p: Product) => (
@@ -276,7 +290,7 @@ export function ProductPage({
   const p: Product | undefined = batchMode
     ? data?.batch.product
     : data?.product;
-  const batch = batchMode ? data?.batch : p?.batches[0];
+  const batch = batchMode ? data?.batch : openBatches(p?.batches || [])[0];
   const [selectedOptions, setSelectedOptions] = useState<Partial<Record<"color" | "type" | "size", string>>>({}),
     [quantity, setQuantity] = useState(1),
     [name, setName] = useState(""),
@@ -289,11 +303,7 @@ export function ProductPage({
   function chooseOption(field: typeof optionFields[number], value: string) {
     setSelectedOptions({ ...choices, [field]: value });
   }
-  const open =
-    batch &&
-    batch.status === "OPEN" &&
-    new Date(batch.opensAt) <= new Date() &&
-    new Date(batch.closesAt) > new Date();
+  const open = batch && isBatchOpen(batch);
   const available = v ? v.onHand - v.reserved : 0;
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -316,7 +326,7 @@ export function ProductPage({
         <State loading={loading} error={error} retry={reload}>
           {p && (
             <>
-              {isBatch && p.batches.length > 1 && <label>Choose an open batch<select aria-label="Choose an open batch" value={batch?.id || ""} onChange={e => router.push("/batch-orders/" + e.target.value)}>{p.batches.map(b => <option key={b.id} value={b.id}>{b.name} — closes {date(b.closesAt)}</option>)}</select></label>}
+              {isBatch && openBatches(p.batches).length > 1 && <label>Choose an open batch<select aria-label="Choose an open batch" value={batch?.id || ""} onChange={e => router.push("/batch-orders/" + e.target.value)}>{openBatches(p.batches).map(b => <option key={b.id} value={b.id}>{b.name} — closes {date(b.closesAt)}</option>)}</select></label>}
               <nav className="breadcrumb">
                 <Link href={isBatch ? "/?type=BATCH" : "/"}>
                   {isBatch ? "Batch Order" : "Shop"}
@@ -334,7 +344,7 @@ export function ProductPage({
               <div className="product-detail-grid">
                 <div>
                   <div className="detail-photo">
-                    <ProductImage product={p} />
+                    <ProductImage product={p} loading="eager" />
                   </div>
                   {isBatch ? (
                     <small className="muted">
@@ -356,7 +366,7 @@ export function ProductPage({
                   </small>
                   <h1>{p.name}</h1>
                   <p className="muted">{p.description}</p>
-                  <h2>{v ? money(v.price) : "Unavailable"}</h2>
+                  <p className="product-price">{v ? money(v.price) : "Unavailable"}</p>
                   {isBatch && (
                     <div className="checkout-steps">
                       <span className={!review ? "active" : ""}>
@@ -495,7 +505,7 @@ export function ProductPage({
                   <h3>Details</h3>
                   <p>
                     {p.description ||
-                      "Campus merchandise from EKRAF BEM MIPA UGM."}
+                      "Campus merchandise from EKRAF BEM KM MIPA UGM."}
                   </p>
                   <div className="detail-assurance">
                     <span>Size and color availability varies by variant.</span>
@@ -531,7 +541,8 @@ export function CartPage() {
     cart.length ? "/api/cart/variants?ids=" + encodeURIComponent(ids) : null,
   );
   const [plan, setPlan] = useState("FULL"),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false), [checkoutError,setCheckoutError]=useState<unknown>(null);
+  const checkoutFormRef=useRef<HTMLFormElement>(null), checkoutInFlight=useRef(false);
   const variants = data?.variants || [];
   const requested = (variantId: string) => cart.filter(line => line.variantId === variantId).reduce((sum, line) => sum + line.quantity, 0);
   const stockIssue = cart.some(line => {
@@ -559,8 +570,10 @@ export function CartPage() {
         : subtotal;
   async function checkout(e: FormEvent) {
     e.preventDefault();
-    if (!user?.phone) return;
+    if (!user?.phone || checkoutInFlight.current) return;
     if (stockIssue) { report("Update or remove unavailable cart items before continuing."); return; }
+    checkoutInFlight.current=true;
+    setCheckoutError(null);
     setBusy(true);
     try {
       const result = await api("/api/orders", {
@@ -583,8 +596,9 @@ export function CartPage() {
       completeCheckout();
       router.push(`/orders/${result.order.id}/payment`);
     } catch (e) {
-      report((e as Error).message);
+      setCheckoutError(e);
     } finally {
+      checkoutInFlight.current=false;
       setBusy(false);
     }
   }
@@ -679,7 +693,7 @@ export function CartPage() {
                   <strong>{money(subtotal)}</strong>
                 </div>
                 {user ? (
-                  <form onSubmit={checkout}>
+                  <form onSubmit={checkout} ref={checkoutFormRef} aria-busy={busy}><FormFeedback error={checkoutError} formRef={checkoutFormRef}>
                     {batchTotal > 0 && (
                       <fieldset>
                         <legend>Batch payment</legend>
@@ -730,7 +744,7 @@ export function CartPage() {
                     >
                       {busy ? "Creating order…" : "Continue to payment"}
                     </button>
-                  </form>
+                  </FormFeedback></form>
                 ) : (
                   <>
                     <p>An account is required to place your order. Your name and WhatsApp number are saved for future checkouts.</p>
@@ -760,9 +774,13 @@ export function AuthPage({ register = false }: { register?: boolean }) {
   const { api, refreshAuth, ready, report } = useStore();
   const router = useRouter(),
     search = useSearchParams();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false), [error,setError]=useState<unknown>(null);
+  const formRef=useRef<HTMLFormElement>(null), inFlight=useRef(false);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if(inFlight.current)return;
+    inFlight.current=true;
+    setError(null);
     const form = new FormData(e.currentTarget);
     setBusy(true);
     try {
@@ -783,18 +801,19 @@ export function AuthPage({ register = false }: { register?: boolean }) {
           : "/orders",
       );
     } catch (e) {
-      report((e as Error).message);
+      setError(e);
     } finally {
+      inFlight.current=false;
       setBusy(false);
     }
   }
   return (
     <StoreLayout simple>
       <div className="auth-page panel">
-        <small className="eyebrow">EKRAF BEM MIPA UGM</small>
+        <small className="eyebrow">EKRAF BEM KM MIPA UGM</small>
         <h1>{register ? "Create your account" : "Welcome back"}</h1>
         <p className="muted">Shop campus merchandise and track your orders.</p>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} ref={formRef} aria-busy={busy}><FormFeedback error={error} formRef={formRef}>
           {register && (
             <label>
               Name
@@ -804,20 +823,21 @@ export function AuthPage({ register = false }: { register?: boolean }) {
                 maxLength={100}
                 autoComplete="name"
                 required
-              />
+              /><FieldError name="name"/>
             </label>
           )}
           {register && <>
           <label>
             WhatsApp / phone number
             <input name="phone" aria-describedby="registration-phone-help" type="tel" autoComplete="tel" required minLength={6} maxLength={30}
-              pattern="[+]?[0-9][0-9 \(\)\-]{5,29}" placeholder="+62 812 3456 7890" />
+              pattern="[+]?[0-9][0-9 \(\)\-]{5,29}" placeholder="+62 812 3456 7890" /><FieldError name="phone"/>
           </label>
           <small id="registration-phone-help">Used for your orders and campus pickup arrangements.</small>
           </>}
           <label>
             Email
-            <input name="email" type="email" autoComplete="email" required />
+            <input name="email" type="email" autoComplete="email" required maxLength={254} />
+            <FieldError name="email" />
           </label>
           <label>
             Password
@@ -828,6 +848,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
               autoComplete={register ? "new-password" : "current-password"}
               required
             />
+            <FieldError name="password" />
           </label>
           <button
             className="button-primary full-width"
@@ -835,7 +856,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
           >
             {register ? "Create account" : "Sign in"}
           </button>
-        </form>
+        </FormFeedback></form>
         <Link
           className="text-link"
           href={`${register ? "/sign-in" : "/register"}?next=${encodeURIComponent(search.get("next") || "/orders")}`}
@@ -967,7 +988,7 @@ export function AboutPage() {
             <small className="eyebrow">EKRAF</small>
             <h1>Made by MIPA, for MIPA</h1>
             <p>
-              EKRAF BEM MIPA UGM is a student organization unit that develops
+              EKRAF BEM KM MIPA UGM is a student organization unit that develops
               creative products, merchandise, and apparel for the MIPA UGM
               community. We make useful, meaningful pieces that represent campus
               life.

@@ -5,8 +5,10 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
   type ReactNode,
 } from "react";
+import { fetchJson } from "./request-errors";
 import type { Api, Product, User } from "./types";
 export type CartLine = {
   id: string;
@@ -20,6 +22,7 @@ type Store = {
   user: User | null;
   ready: boolean;
   csrf: string;
+  sessionError: string;
   refreshAuth: () => Promise<void>;
   notice: string;
   report: (message: string) => void;
@@ -36,10 +39,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null),
     [ready, setReady] = useState(false),
     [csrf, setCsrf] = useState(""),
+    [sessionError,setSessionError] = useState(""),
     [cart, setCart] = useState<CartLine[]>([]),
     [keys, setKeys] = useState<Record<string, string>>({}),
     [notice, setNotice] = useState(""),
     [storageReady, setStorageReady] = useState(false);
+  const csrfRef = useRef("");
   const report = useCallback((message: string) => setNotice(message), []);
   const api: Api = useCallback(
     async (url, options = {}) => {
@@ -47,39 +52,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (typeof options.body === "string")
         headers.set("Content-Type", "application/json");
       if (options.method && !["GET", "HEAD"].includes(options.method))
-        headers.set("X-CSRF-Token", csrf);
-      const response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: "include",
-        cache: "no-store",
-      });
-      const data =
-        response.status === 204
-          ? null
-          : await response.json().catch(() => ({}));
-      if (!response.ok)
-        throw Object.assign(
-          new Error(
-            data.error || "Unable to complete the request. Please try again.",
-          ),
-          { status: response.status },
-        );
-      return data;
+        headers.set("X-CSRF-Token", csrfRef.current);
+      return fetchJson(url,{...options,headers});
     },
-    [csrf],
+    [],
   );
   const refreshAuth = useCallback(async () => {
-    // Establish the session cookie before another request can create a competing session.
-    const csrfResponse = await fetch("/api/csrf", { credentials: "include", cache: "no-store" });
-    const meResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
-    const responses = [csrfResponse, meResponse];
-    if (responses.some((r) => !r.ok))
-      throw new Error("Could not load your session. Refresh to retry.");
-    const [c, m] = await Promise.all(responses.map((r) => r.json()));
-    setCsrf(c.token);
-    setUser(m.user);
-    setReady(true);
+    setSessionError("");
+    try {
+      // Establish the session cookie before another request can create a competing session.
+      const c = await fetchJson("/api/csrf");
+      const m = await fetchJson("/api/auth/me");
+      csrfRef.current = c.token;
+      setCsrf(c.token);
+      setUser(m.user);
+      setReady(true);
+    } catch(error) {
+      setSessionError(error instanceof Error ? error.message : "Could not load your session. Please retry.");
+      throw error;
+    }
   }, []);
   useEffect(() => {
     try {
@@ -173,6 +164,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         user,
         ready,
         csrf,
+        sessionError,
         refreshAuth,
         notice,
         report,

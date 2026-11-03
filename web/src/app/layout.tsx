@@ -4,12 +4,13 @@ import "../style.css";
 import { StoreProvider } from "@/features/store/store-provider";
 
 export const metadata: Metadata = {
-  title: "EKRAF | BEM MIPA UGM",
-  description: "Merchandise and faculty batch pieces from EKRAF BEM MIPA UGM.",
+  title: "EKRAF | BEM KM MIPA UGM",
+  description: "Merchandise and faculty batch pieces from EKRAF BEM KM MIPA UGM.",
 };
 
 export const viewport: Viewport = {
   themeColor: "#00552e",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

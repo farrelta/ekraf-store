@@ -1,4 +1,4 @@
-# EKRAF BEM MIPA UGM Store
+# EKRAF BEM KM MIPA UGM Store
 
 Next.js storefront and Express API backed by PostgreSQL 17 and Prisma 7. The app sells continuous-stock merchandise and batch products with preset sizes and optional embroidery, using manual QRIS/bank verification and campus pickup.
 
@@ -19,6 +19,7 @@ Normal setup does not seed products, payment methods, or passwords. For sample d
 | Document | Use it for |
 | --- | --- |
 | [Setup](docs/SETUP.md) | Local startup, admin account, configuration, catalog entry, standard checks. |
+| [Design system](DESIGN.md) | Current colors, typography, components, artwork, and responsive behavior. |
 | [Architecture](docs/ARCHITECTURE.md) | Source map, routes, shared state, queries, reporting definitions. |
 | [Database](docs/DATABASE.md) | Tables, variants, deposits, inventory, pickup, retention, migrations. |
 | [drawDB schema](docs/schema.dbml) | Importable database diagram. |

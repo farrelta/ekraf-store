@@ -1,4 +1,5 @@
 "use client";
+import { openBatches } from "./batch-window";
 import Link from "next/link";
 import {
   useParams,
@@ -6,7 +7,7 @@ import {
   useRouter,
   usePathname,
 } from "next/navigation";
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useStore, useData } from "./store-provider";
 import { ProductEditor, BatchEditor, PaymentSettings } from "./admin-forms";
 import { OrderCard } from "./order-card";
@@ -140,6 +141,23 @@ function Dashboard() {
       error,
       reload,
     } = useData("/api/admin/dashboard?" + search);
+  const [greeting, setGreeting] = useState("Welcome");
+  useEffect(() => {
+    const clock = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "numeric", hourCycle: "h23" });
+    const updateGreeting = () => {
+      const hour = Number(clock.format(new Date()));
+      setGreeting(hour >= 5 && hour < 12 ? "Good Morning" : hour < 17 && hour >= 12 ? "Good Afternoon" : hour >= 17 && hour < 21 ? "Good Evening" : "Good Night");
+    };
+    updateGreeting();
+    const timer = window.setInterval(updateGreeting, 60_000);
+    window.addEventListener("focus", updateGreeting);
+    document.addEventListener("visibilitychange", updateGreeting);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", updateGreeting);
+      document.removeEventListener("visibilitychange", updateGreeting);
+    };
+  }, []);
   const set = (k: string, v: string) => {
     const q = new URLSearchParams(search.toString());
     q.set(k, v);
@@ -153,7 +171,7 @@ function Dashboard() {
     <>
       <div className="admin-title">
         <div>
-          <h1>Hello, {user?.name.split(" ")[0]}</h1>
+          <h1>{greeting}, {user?.name.split(" ")[0]}</h1>
           <p>Here’s what’s happening in your store.</p>
         </div>
         <DateFilters
@@ -541,9 +559,9 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                     </div>
                   )}
                   {section === "batches" &&
-                    d?.batches.find((b: any) => b.status === "OPEN") &&
+                    openBatches(d?.batches || [])[0] &&
                     (() => {
-                      const b = d.batches.find((b: any) => b.status === "OPEN");
+                      const b = openBatches<any>(d.batches)[0];
                       return (
                         <div className="batch-overview">
                           <section className="panel form-section">
@@ -751,12 +769,8 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                             : "Merchandise",
                           p.fromPrice ? money(p.fromPrice) : "—",
                           p.sellingType === "BATCH"
-                            ? p.batches.find((b: any) => b.status === "OPEN")
-                              ? date(
-                                  p.batches.find(
-                                    (b: any) => b.status === "OPEN",
-                                  ).closesAt,
-                                )
+                            ? openBatches<any>(p.batches)[0]
+                              ? date(openBatches<any>(p.batches)[0].closesAt)
                               : "No open batch"
                             : p.availableStock === 0
                               ? "Sold out"

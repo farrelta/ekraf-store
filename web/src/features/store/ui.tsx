@@ -45,6 +45,7 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
         <path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5zM10 21h4" />
       </>
     ),
+    close: <path d="m6 6 12 12M6 18 18 6" />,
     menu: <path d="M3 6h18M3 12h18M3 18h18" />,
     check: <path d="m4 12 5 5L20 6" />,
     upload: <path d="M12 16V2m-5 5 5-5 5 5M4 14v7h16v-7" />,
@@ -116,19 +117,21 @@ export function Badge({ value }: { value: string }) {
 }
 export function State({
   loading,
+  fallback,
   error,
   empty,
   children,
   retry,
 }: {
   loading?: boolean;
+  fallback?: ReactNode;
   error?: string;
   empty?: boolean;
   children?: ReactNode;
   retry?: () => void;
 }) {
   if (loading)
-    return (
+    return fallback ?? (
       <div className="empty" role="status">
         Loading…
       </div>
@@ -277,6 +280,7 @@ export function StoreLayout({
       <Notice />
       <main>
         <TestEnvironmentBanner />
+        <SessionFeedback />
         {title && (
           <div className="store-container page-heading">
             <h1>{title}</h1>
@@ -290,12 +294,12 @@ export function StoreLayout({
           <Link className="wordmark" href="/">
             EKRAF
           </Link>
-          <span>Official store of EKRAF BEM MIPA UGM</span>
+          <span>Official store of EKRAF BEM KM MIPA UGM</span>
           <nav>
             <Link href="/">Shop</Link>
             <Link href="/about">About</Link><Link href="/announcements">Announcements</Link>
           </nav>
-          <small>© {new Date().getFullYear()} EKRAF BEM MIPA UGM</small>
+          <small>© {new Date().getFullYear()} EKRAF BEM KM MIPA UGM</small>
         </div>
       </footer>
       {!simple && (
@@ -381,4 +385,11 @@ export function TestEnvironmentBanner() {
 export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
   const [visible,setVisible]=useState(false);
   return <span className="password-field"><input {...props} aria-label={props["aria-label"] || "Password"} type={visible ? "text" : "password"} /><button type="button" aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible} onClick={()=>setVisible(!visible)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>{visible && <path d="m3 3 18 18"/>}</svg></button></span>;
+}
+
+export function SessionFeedback() {
+  const {sessionError,refreshAuth}=useStore();
+  const [busy,setBusy]=useState(false);
+  if(!sessionError&&!busy)return null;
+  return <div className="form-error-summary session-feedback" role={busy ? "status" : "alert"}><p>{sessionError || "Loading your session…"}</p><button type="button" disabled={busy} onClick={async()=>{setBusy(true);try{await refreshAuth();}catch{}finally{setBusy(false);}}}>Retry session</button></div>;
 }

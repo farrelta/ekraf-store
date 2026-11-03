@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { useState, type ReactNode, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import { useStore } from "./store-provider";
-import { Avatar, Icon, Notice, State, TestEnvironmentBanner, PasswordInput } from "./ui";
+import { FormFeedback, FieldError } from "./form-feedback";
+import { Icon, Notice, State, TestEnvironmentBanner, PasswordInput, SessionFeedback } from "./ui";
 const sections = [
   ["", "Dashboard", "dashboard"],
   ["orders", "Orders", "orders"],
@@ -29,9 +30,24 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
         ? "Payment review"
         : (sections.find(([path]) => path === section)?.[1] ?? "Dashboard");
   const [busy, setBusy] = useState(false),
-    [menu, setMenu] = useState(false);
+    [loginError,setLoginError]=useState<unknown>(null);
+  const loginRef=useRef<HTMLFormElement>(null), loginInFlight=useRef(false);
+  const bottomNavRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const revealActive = () => {
+      if (media.matches) bottomNavRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+    };
+    revealActive();
+    media.addEventListener("change", revealActive);
+    return () => media.removeEventListener("change", revealActive);
+  }, [pathname, user?.role]);
+  const signOut = () => void api("/api/auth/logout", { method: "POST" }).then(refreshAuth).catch(e => report(e.message));
   async function login(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if(loginInFlight.current)return;
+    loginInFlight.current=true;
+    setLoginError(null);
     const f = new FormData(e.currentTarget);
     setBusy(true);
     try {
@@ -44,27 +60,18 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
       });
       await refreshAuth();
     } catch (e) {
-      report((e as Error).message);
+      setLoginError(e);
     } finally {
+      loginInFlight.current=false;
       setBusy(false);
     }
   }
-  const nav = (mobile = false) =>
-    (mobile
-      ? sections.filter((s) =>
-          ["", "orders", "products", "customers"].includes(s[0]),
-        )
-      : sections
-    ).map(([path, label, icon]) => (
+  const isActive = (path: string) => pathname === base + (path ? "/" + path : "") || (!!path && pathname.startsWith(base + "/" + path + "/"));
+  const nav = () => sections.map(([path, label, icon]) => (
       <Link
-        onClick={() => setMenu(false)}
         key={path}
-        className={
-          pathname === base + (path ? "/" + path : "") ||
-          (!!path && pathname.startsWith(base + "/" + path + "/"))
-            ? "active"
-            : ""
-        }
+        className={isActive(path) ? "active" : ""}
+        aria-current={isActive(path) ? "page" : undefined}
         href={base + (path ? "/" + path : "")}
       >
         <Icon name={icon} />
@@ -75,36 +82,24 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
     <div className={`admin-shell ${record ? "admin-detail" : ""}`}>
       <header className="admin-header">
         <Link className="wordmark" href={base}>
-          EKRAF<span>BEM MIPA UGM</span>
+          EKRAF<span>BEM KM MIPA UGM</span>
         </Link>
         <small className="admin-label">ADMIN</small>
         <div className="header-actions">
           {user?.role === "ADMIN" && (
             <>
               <button
-                className="admin-menu"
-                aria-label="Admin menu"
-                aria-expanded={menu}
-                onClick={() => setMenu(!menu)}
-              >
-                <Icon name="menu" />
-              </button>
-              <button
                 className="small"
-                onClick={() =>
-                  void api("/api/auth/logout", { method: "POST" })
-                    .then(refreshAuth)
-                    .catch((e) => report(e.message))
-                }
+                onClick={signOut}
               >
                 Sign out
               </button>
-              <Avatar name={user.name} />
             </>
           )}
         </div>
       </header>
       <Notice />
+      <SessionFeedback />
       {!ready ? (
         <State loading />
       ) : user?.role !== "ADMIN" ? (
@@ -115,31 +110,33 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
           <p className="muted">
             Use your administrator account to manage the store.
           </p>
-          <form onSubmit={login}>
+          <form onSubmit={login} ref={loginRef} aria-busy={busy}><FormFeedback error={loginError} formRef={loginRef}>
             <label>
               Email
               <input
                 name="email"
                 type="email"
                 autoComplete="username"
+                maxLength={254}
                 required
-              />
+              /><FieldError name="email"/>
             </label>
             <label>
               Password
               <PasswordInput
                 name="password"
                 autoComplete="current-password"
+                maxLength={128}
                 required
               />
-            </label>
+            <FieldError name="password"/></label>
             <button
               className="button-primary full-width"
               disabled={busy || !csrf}
             >
               Sign in to admin
             </button>
-          </form>
+          </FormFeedback></form>
         </main>
       ) : (
         <>
@@ -147,16 +144,10 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
             <header className="mobile-routebar">
               <Link href={record ? `${base}/${section}` : base}>‹ Back</Link>
               <strong>{mobileTitle}</strong>
-              <button
-                aria-label="Admin menu"
-                aria-expanded={menu}
-                onClick={() => setMenu(!menu)}
-              >
-                <Icon name="menu" />
-              </button>
+              <button type="button" onClick={signOut}>Sign out</button>
             </header>
           )}
-          <aside className={`admin-sidebar ${menu ? "is-open" : ""}`}>
+          <aside className="admin-sidebar">
             <nav aria-label="Administration">{nav()}</nav>
             <small>EKRAF Store Admin · {new Date().getFullYear()}</small>
           </aside>
@@ -164,8 +155,9 @@ export default function AdminConsole({ children }: { children: ReactNode }) {
           <nav
             className="mobile-tabs admin-bottom"
             aria-label="Admin navigation"
+            ref={bottomNavRef}
           >
-            {nav(true)}
+            {nav()}
           </nav>
         </>
       )}

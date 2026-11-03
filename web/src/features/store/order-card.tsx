@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { type Api, type Order, type PaymentMethod, date, money } from "./types";
+import { FormFeedback, FieldError } from "./form-feedback";
+import { RequestError } from "./request-errors";
 import { Badge, Icon, CustomerSupport } from "./ui";
 export function OrderCard({
   order,
@@ -24,7 +26,8 @@ export function OrderCard({
 }) {
   const [busy, setBusy] = useState(false),
     [methodId, setMethodId] = useState(""),
-    [fileName, setFileName] = useState("");
+    [fileName, setFileName] = useState(""), [error,setError]=useState<unknown>(null);
+  const formRef=useRef<HTMLFormElement>(null), inFlight=useRef(false);
   const reviewHours = Number(process.env.NEXT_PUBLIC_PAYMENT_REVIEW_HOURS || 24);
   const reviewTime = Number.isFinite(reviewHours) && reviewHours > 0 ? `Payment proof is reviewed within ${reviewHours} hours maximum.` : "Review timing will be confirmed by the EKRAF team.";
   const method = methods.find((m) => m.id === methodId) ?? methods[0];
@@ -37,13 +40,17 @@ export function OrderCard({
       (order.paymentStatus === "PENDING" &&
         new Date(order.expiresAt) > new Date());
   const run = async (work: () => Promise<unknown>) => {
+    if(inFlight.current)return;
+    inFlight.current=true;
+    setError(null);
     setBusy(true);
     try {
       await work();
       await onChange();
     } catch (e) {
-      report((e as Error).message);
+      setError(e);
     } finally {
+      inFlight.current=false;
       setBusy(false);
     }
   };
@@ -69,8 +76,9 @@ export function OrderCard({
     const f = new FormData(e.currentTarget),
       file = f.get("proof") as File;
     if (!file?.size || !method) return;
+    if(!["image/png","image/jpeg"].includes(file.type)){setError(new RequestError(400,{details:[{path:"proof",message:"Choose a JPG or PNG image."}]}));return;}
     if (file.size > 5 * 1024 * 1024) {
-      report("Choose a JPG or PNG smaller than 5 MB.");
+      setError(new RequestError(400,{details:[{path:"proof",message:"Choose a JPG or PNG smaller than 5 MB."}]}));
       return;
     }
     await run(async () => {
@@ -86,9 +94,10 @@ export function OrderCard({
     });
   }
   async function review(s: string, action: string, form: HTMLFormElement) {
+    formRef.current=form;
     const f = new FormData(form);
     if (action === "REJECTED" && !String(f.get("reason") || "").trim()) {
-      report("Enter a rejection reason.");
+      setError(new RequestError(400,{details:[{path:"reason",message:"Enter a rejection reason."}]}));
       return;
     }
     await run(() =>
@@ -105,7 +114,7 @@ export function OrderCard({
     (s) => !submissionId || s.id === submissionId,
   );
   return (
-    <article className={paymentPage ? "payment-order" : "order-card panel"}>
+    <FormFeedback error={error} formRef={formRef}><article className={paymentPage ? "payment-order" : "order-card panel"}>
       <div className="order-head">
         <div>
           <small>ORDER REFERENCE</small>
@@ -132,7 +141,7 @@ export function OrderCard({
                 </div>
               </div>
             ) : open ? (
-              <form className="payment-form" onSubmit={upload}>
+              <form className="payment-form" onSubmit={upload} ref={formRef} aria-busy={busy}>
                 <h2>
                   {order.phase === "INITIAL"
                     ? "Choose payment method"
@@ -224,6 +233,7 @@ export function OrderCard({
                             setFileName(e.target.files?.[0]?.name || "")
                           }
                         />
+                        <FieldError name="proof" />
                       </label>
                       <dl className="contact-summary"><div><dt>Your name</dt><dd>{order.customerName}</dd></div><div><dt>WhatsApp number</dt><dd>{order.customerPhone}</dd></div></dl>
                       <p className="muted">Change your details on the <Link className="text-link" href="/account">Account page</Link> for future orders. This order keeps the details recorded at checkout.</p>
@@ -346,7 +356,7 @@ export function OrderCard({
 
                       <label>
                         Review reason
-                        <input name="reason" maxLength={1000} />
+                        <input name="reason" maxLength={1000} /><FieldError name="reason"/>
                       </label>
                       <div className="button-row">
                         <button className="button-primary" disabled={busy}>
@@ -451,6 +461,6 @@ export function OrderCard({
           )}
         </aside>
       </div>
-    </article>
+    </article></FormFeedback>
   );
 }

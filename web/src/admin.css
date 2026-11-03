@@ -2,12 +2,12 @@
   display: none;
 }
 .admin-shell {
-  --green: #00aa46;
-  --ink: #17171b;
-  --muted: #7b7b88;
-  --line: #e8e8ed;
+  --green: #00552e;
+  --ink: #202a24;
+  --muted: #5c685f;
+  --line: #dfe5df;
   --radius: 7px;
-  background: white;
+  background: #f7f9f5;
   min-height: 100vh;
   padding-top: 64px;
   color: var(--ink);
@@ -43,11 +43,9 @@
 .admin-label {
   font-weight: 600;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
-.admin-menu {
-  display: none;
-}
+
 .avatar {
   width: 32px;
   height: 32px;
@@ -67,7 +65,7 @@
   left: 0;
   width: 220px;
   border-right: 1px solid var(--line);
-  background: #fafafa;
+  background: #f1f4ed;
   display: flex;
   flex-direction: column;
   padding: 24px 16px;
@@ -88,7 +86,7 @@
   border-radius: 5px;
 }
 .admin-sidebar nav a.active {
-  background: #00c853;
+  background: var(--green);
   color: white;
   font-weight: 600;
 }
@@ -99,7 +97,7 @@
   margin-top: auto;
   border-top: 1px solid var(--line);
   padding-top: 18px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .admin-main {
@@ -133,8 +131,8 @@
   border-radius: 7px;
 }
 .admin-shell .button-primary {
-  background: #00c853;
-  border-color: #00c853;
+  background: var(--green);
+  border-color: var(--green);
 }
 .admin-shell .button-secondary {
   background: white;
@@ -206,8 +204,8 @@
   overflow: visible;
 }
 .sales-chart text {
-  font-size: 9px;
-  fill: #858590;
+  font-size: 11px;
+  fill: var(--muted);
 }
 .sales-chart details {
   margin-top: 14px;
@@ -226,8 +224,8 @@
   border: 0;
 }
 .action-panel > a > svg {
-  color: #e99c28;
-  background: #fff5e7;
+  color: var(--warning);
+  background: var(--warning-surface);
   padding: 5px;
   width: 28px;
   height: 28px;
@@ -244,7 +242,7 @@
   display: block;
   color: var(--muted);
   margin-top: 7px;
-  font-size: 10px;
+  font-size: 11px;
 }
 .action-panel > a > span {
   color: var(--green);
@@ -289,7 +287,7 @@
   align-items: center;
   gap: 7px;
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .date-filters input {
@@ -315,12 +313,12 @@ table {
   font-size: 11px;
 }
 th {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: #f6f6f8;
+  background: #edf2e9;
   padding: 16px;
   white-space: nowrap;
 }
@@ -336,7 +334,7 @@ td > small,
 td > span > small {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 3px;
 }
 td .button-primary,
@@ -362,12 +360,12 @@ td .button-secondary {
   background: #f4f4f6;
   display: grid;
   place-items: center;
-  font-size: 10px;
+  font-size: 11px;
 }
 .product-cell small {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 3px;
 }
 .product-cell strong,
@@ -400,7 +398,7 @@ td .button-secondary {
 }
 .batch-metrics small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 .batch-metrics strong {
   font-size: 20px;
@@ -417,9 +415,9 @@ td .button-secondary {
   margin: 20px 0;
 }
 .admin-shell .info-note {
-  background: #e5f9ed;
-  border-color: #c3efd3;
-  color: #078c3d;
+  background: var(--selection);
+  border-color: var(--selection-border);
+  color: var(--green);
 }
 .admin-login {
   max-width: 460px;
@@ -489,6 +487,15 @@ td .button-secondary {
   margin-bottom: 5px;
 }
 .admin-shell .button-danger {
-  border-color: #ec5f67;
-  color: #df333e;
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
+
+.admin-shell .button-primary:not(:disabled):hover { background: var(--action-hover); border-color: var(--action-hover); }
+.admin-sidebar nav a:not(.active):hover { background: var(--selection); color: var(--green); }
+.admin-shell tbody tr:hover { background: #f4f7f0; }
+.admin-shell .sales-chart line { stroke: var(--line); }
+.admin-shell .sales-chart polyline { stroke: var(--green); }
+
+.admin-shell .compact-search { background:white; }
+.admin-shell .compact-search input { background:transparent; }

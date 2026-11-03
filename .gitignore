@@ -18,3 +18,4 @@ api/storage/
 .next-e2e/
 web/public/test-fixtures/
 skills-lock.json
+DESIGN.md

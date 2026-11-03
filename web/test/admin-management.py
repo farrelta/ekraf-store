@@ -64,6 +64,11 @@ with sync_playwright() as p:
         assert not page.evaluate("document.documentElement.scrollWidth>innerWidth")
         if os.environ.get("TEST_SCREENSHOT_DIR"):
             page.screenshot(path=str(Path(os.environ["TEST_SCREENSHOT_DIR"])/f"admin-batch-fixed-{width}.png"),full_page=True)
+    variant['hasOrderHistory']=True
+    product['variants'].append({**variant,'id':'unused','sku':'EKR-UNUSED','hasOrderHistory':False})
+    page.goto(base+'/products/p')
+    delete=page.get_by_role('button',name='Delete variant permanently',exact=True)
+    expect(delete.nth(0)).to_be_disabled();expect(delete.nth(1)).to_be_enabled()
     assert not errors, errors
     browser.close()
     print("Admin management checks passed: decimal edits, older catalog, valid transitions, unchanged dates, receipt labels, deletion placement and responsive forms.")

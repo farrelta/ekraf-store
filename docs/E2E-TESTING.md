@@ -180,3 +180,19 @@ The browser fixture scripts in `web/test/customer-*.py` and `web/test/admin-mana
 - [ ] Batch initial stock cannot be entered; receive delivered stock from the batch editor.
 - [ ] Customer/admin Show and Hide password buttons toggle without submitting the login form.
 - [ ] Contact details are text in checkout and payment; Account edits apply to future orders only.
+
+## Interface hardening checks
+
+With the isolated test server running:
+
+```powershell
+node --test web/test/hardening.test.mjs
+python web/test/hardening.py
+```
+
+These checks cover date-aware batch selection, persistent field-linked validation errors, input preservation, offline/server/rate-limit/session failures, request timeout, duplicate-submit prevention, refreshed CSRF tokens, visible receipt-upload focus/error states, sticky-summary clearance, broken catalog images, and Unicode at narrow widths. Browser API mutations are intercepted; they do not create real orders or products. Success notifications still use the five-second shrinking progress bar; errors remain with the form until another submission succeeds. The test defaults to the manual E2E address/private path; `TEST_BASE_URL` and `ADMIN_PANEL_PATH` can override them.
+
+
+## Responsive interaction checks
+
+After `npm run e2e:prepare` and starting the isolated test frontend, run `python web/test/adapt.py`. It checks customer and admin layouts from 320 to 2560 pixels, phone landscape, mobile collection search, touch target sizes, quantity/cart persistence, and horizontal admin navigation by touch and keyboard, active-section visibility, and desktop sidebar behavior. It uses seeded catalog data and a test admin login; it does not save catalog changes or create orders. Screenshots are saved under ignored `api/storage/e2e/adapt/`. These are Chromium viewport and synthesized touch checks, not physical iOS/Android device results.

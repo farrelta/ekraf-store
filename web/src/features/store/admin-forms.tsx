@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState, type ReactNode, type FormEvent } from "react";
+import { useRef, useState, type ReactNode, type FormEvent } from "react";
+import { FormFeedback, FieldError } from "./form-feedback";
 import { CategorySelect, VariantInputs } from "./catalog-fields";
 import { useData, useStore } from "./store-provider";
 import { Badge, State } from "./ui";
@@ -41,11 +42,14 @@ function Field({
       <input
         name={name}
         type={type}
+        maxLength={type === "text" ? 160 : type === "url" ? 2048 : undefined}
         defaultValue={value}
         required={required}
         min={min}
+        max={type === "number" ? name === "price" ? 999999999.99 : name === "weeks" ? 52 : 100000 : undefined}
         step={step ?? (type === "number" ? "1" : undefined)}
       />
+      <FieldError name={name} />
     </label>
   );
 }
@@ -57,23 +61,29 @@ export function ActionForm({
   submit: (f: FormData) => Promise<unknown>;
 }) {
   const { report } = useStore();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false), [error,setError]=useState<unknown>(null);
+  const formRef=useRef<HTMLFormElement>(null), inFlight=useRef(false);
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if(inFlight.current)return;
+    inFlight.current=true;
     const f = new FormData(e.currentTarget);
+    setError(null);
     setBusy(true);
     try {
       await submit(f);
       report("Saved successfully.");
     } catch (e) {
-      report((e as Error).message);
+      setError(e);
     } finally {
+      inFlight.current=false;
       setBusy(false);
     }
   }
   return (
-    <form className="editor-form" onSubmit={save}>
-      <fieldset disabled={busy}>{children}</fieldset>
+    <form className="editor-form" onSubmit={save} ref={formRef} aria-busy={busy}>
+      <FormFeedback error={error} formRef={formRef}><fieldset disabled={busy}>{children}</fieldset></FormFeedback>
+      {busy && <p role="status">Saving…</p>}
     </form>
   );
 }
@@ -239,7 +249,7 @@ export function ProductEditor({ id }: { id?: string }) {
                     <Badge value={v.active ? "PUBLISHED" : "ARCHIVED"} />
                   </div>
                   <p className="sku">SKU: {v.sku}</p>
-                  <button type="button" className="button-danger" disabled={!!deletingVariant || p.variants.length <= 1} onClick={() => void deleteVariant(v)}>Delete variant permanently</button>
+                  <button type="button" className="button-danger" disabled={!!deletingVariant || p.variants.length <= 1 || v.hasOrderHistory} title={v.hasOrderHistory ? "Variants with order history cannot be deleted." : p.variants.length <= 1 ? "Keep at least one variant." : undefined} onClick={() => void deleteVariant(v)}>Delete variant permanently</button>
                   <p className="muted">Variants with order history cannot be deleted. Stock history keeps the SKU after deletion. Keep at least one variant.</p>
                   <p className="muted">
                     {v.onHand} on hand · {v.reserved} reserved ·{" "}
@@ -262,8 +272,8 @@ export function ProductEditor({ id }: { id?: string }) {
                       <p className="muted">{v.hasOrderHistory ? "Size, color and type are locked because this variant has order history." : "Edit options before this variant has orders. SKU and stock stay unchanged."}</p>
                       <div className="form-grid">
                         <label>Size<select name="size" aria-label="Size" defaultValue={v.size}>{[...new Set([...options.sizes,v.size])].filter(size => p.sellingType !== "BATCH" || size !== "STANDARD").map(size => <option key={size} value={size}>{size === "STANDARD" ? "No size" : size}</option>)}</select></label>
-                        <label>Color<input name="color" defaultValue={v.color === "STANDARD" ? "" : v.color} maxLength={160}/></label>
-                        <label>Type<input name="type" defaultValue={v.type === "STANDARD" ? "" : v.type} maxLength={160}/></label>
+                        <label>Color<input name="color" defaultValue={v.color === "STANDARD" ? "" : v.color} maxLength={160}/><FieldError name="color"/></label>
+                        <label>Type<input name="type" defaultValue={v.type === "STANDARD" ? "" : v.type} maxLength={160}/><FieldError name="type"/></label>
                       </div>
                     </fieldset>
                     <div className="form-grid">
@@ -442,6 +452,7 @@ export function BatchEditor({ id }: { id?: string }) {
                     Product
                     <select
                       aria-label="Product"
+                      name="productId"
                       required
                       value={productId}
                       onChange={(e) => setProductId(e.target.value)}
@@ -625,7 +636,7 @@ export function PaymentSettings() {
           </div>
           <label>
             Instructions
-            <textarea name="instructions" rows={3} />
+            <textarea name="instructions" rows={3} maxLength={2000} />
           </label>
           <button className="button-primary">Add payment method</button>
         </section>

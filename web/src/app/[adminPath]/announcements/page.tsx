@@ -1,2 +1,2 @@
-import { AdminAnnouncements } from "@/features/store/announcements";
+import { AdminAnnouncements } from "@/features/store/admin-announcements";
 export default function Page(){return <AdminAnnouncements/>;}

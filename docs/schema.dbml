@@ -1,4 +1,4 @@
-// Initial EKRAF BEM MIPA UGM store design for drawDB: ten application tables.
+// Initial EKRAF BEM KM MIPA UGM store design for drawDB: ten application tables.
 // Proposed design only; application schema and migrations are managed separately.
 // All IDs are application-generated opaque text. All monetary amounts are IDR.
 // Rules in Notes require SQL constraints/triggers or application validation.
