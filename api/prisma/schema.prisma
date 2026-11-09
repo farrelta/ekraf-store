@@ -124,6 +124,7 @@ model Product {
   name        String
   description String           @default("")
   imageKey    String?          @map("image_key")
+  imageKeys   String[]         @default([]) @map("image_keys")
   sellingType SellingType      @map("selling_type")
   status      ProductStatus    @default(DRAFT)
   createdAt   DateTime         @default(now()) @map("created_at")
@@ -199,14 +200,14 @@ model Order {
 
 model OrderItem {
   batchId         String?             @map("batch_id")
-  batch           Batch?              @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  batch           Batch?              @relation(fields: [batchId], references: [id], onDelete: SetNull)
   pickupStatus    PickupStatus        @default(PENDING) @map("pickup_status")
   movements       InventoryMovement[]
   id              String              @id @default(cuid())
   orderId         String              @map("order_id")
   order           Order               @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  variantId       String              @map("variant_id")
-  variant         ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  variantId       String?              @map("variant_id")
+  variant         ProductVariant?      @relation(fields: [variantId], references: [id], onDelete: SetNull)
   itemDescription String              @map("item_description")
   unitPrice       Decimal             @map("unit_price") @db.Decimal(12, 2)
   quantity        Int
@@ -266,7 +267,7 @@ model InventoryMovement {
   orderId       String?               @map("order_id")
   order         Order?                @relation(fields: [orderId], references: [id], onDelete: Restrict)
   batchId       String?               @map("batch_id")
-  batch         Batch?                @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  batch         Batch?                @relation(fields: [batchId], references: [id], onDelete: SetNull)
   actorId       String?               @map("actor_id")
   actor         User?                 @relation(fields: [actorId], references: [id], onDelete: Restrict)
   type          InventoryMovementType

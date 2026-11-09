@@ -22,9 +22,8 @@ export function VariantInputs({ options, sellingType }: { options: CatalogOption
     <p><strong>SKU</strong><br/>Generated automatically when saved.</p>
     <p>One combination per variant—for example, M / Black. Add another variant for L / Black.</p>
     <div className="form-grid">
-      <label>Size<select key={sellingType} name="size" aria-label="Size" required defaultValue={isBatch ? "" : "STANDARD"}>
-        {isBatch && <option value="" disabled>Choose a clothing size</option>}
-        {options.sizes.filter(value => !isBatch || value !== "STANDARD").map(value => <option key={value} value={value}>{value === "STANDARD" ? "No size" : value}</option>)}
+      <label>Size<select key={sellingType} name="size" aria-label="Size" required defaultValue="STANDARD">
+        {options.sizes.map(value => <option key={value} value={value}>{value === "STANDARD" ? "No size" : value}</option>)}
       </select><FieldError name="size"/></label>
       <label>Color<input name="color" aria-label="Color" maxLength={160} placeholder="Black; blank if not offered"/><FieldError name="color"/></label>
       <label>Type<input name="type" aria-label="Type" maxLength={160} placeholder="Physics; blank if not offered"/><FieldError name="type"/></label>

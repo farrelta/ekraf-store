@@ -1,0 +1,44 @@
+x-app: &app
+  image: ekraf-store:release
+  pull_policy: never
+  env_file: .env.production
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  db:
+    image: postgres:17-alpine
+    env_file: .env.database
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    <<: *app
+    working_dir: /app/api
+    command: ["node", "dist/index.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - api_uploads:/app/api/storage
+  web:
+    <<: *app
+    working_dir: /app/web
+    command: ["../node_modules/.bin/next", "start", "--hostname", "0.0.0.0", "--port", "5173"]
+    env_file: .env.web
+    ports: ["127.0.0.1:5173:5173"]
+
+volumes:
+  postgres_data:
+  api_uploads:

@@ -17,25 +17,8 @@ import {
 import { jacketPhoto, keychainPhoto } from "./design-assets";
 import { AnnouncementBanner } from "./announcements";
 import { OrderCard } from "./order-card";
+import { ProductImage, ProductGallery } from "./product-images";
 
-export function ProductImage({ product, loading = "lazy" }: { product: Product; loading?: "eager" | "lazy" }) {
-  const [failedSource,setFailedSource]=useState<string|null>(null);
-  return product.imageKey && failedSource !== product.imageKey ? (
-    <img
-      src={product.imageKey}
-      loading={loading}
-      decoding="async"
-      alt={product.name}
-      onError={()=>setFailedSource(product.imageKey)}
-      referrerPolicy="no-referrer"
-    />
-  ) : (
-    <div className="image-placeholder">
-      <Icon name="box" size={36} />
-      <span>{product.name}</span>
-    </div>
-  );
-}
 const price = (p: Product) =>
   p.variants
     .filter((v) => v.active)
@@ -49,9 +32,7 @@ function ProductTile({ product: p }: { product: Product }) {
       : `/products/${p.id}`;
   return (
     <article className="product-tile">
-      <Link className="tile-image" href={href}>
-        <ProductImage product={p} />
-      </Link>
+      <Link className="tile-image" href={href}><ProductImage product={p}/></Link>
       <div className="tile-meta">
         <small>
           {p.sellingType === "BATCH"
@@ -343,20 +324,8 @@ export function ProductPage({
               )}
               <div className="product-detail-grid">
                 <div>
-                  <div className="detail-photo">
-                    <ProductImage product={p} loading="eager" />
-                  </div>
-                  {isBatch ? (
-                    <small className="muted">
-                      Sample image · color may vary slightly
-                    </small>
-                  ) : (
-                    p.imageKey && (
-                      <div className="photo-thumb">
-                        <ProductImage product={p} />
-                      </div>
-                    )
-                  )}
+                  <ProductGallery product={p} eager/>
+                  {isBatch && <small className="muted">Sample image · color may vary slightly</small>}
                 </div>
                 <div className="product-detail-copy">
                   <small className="eyebrow">

@@ -21,7 +21,7 @@ Ten application tables, plus session and Prisma migration infrastructure:
 
 ## Products and variants
 
-Products are CONTINUOUS or BATCH, with DRAFT/PUBLISHED/ARCHIVED status. Each has at least one variant. Size/color/type values are normalized before enforcing uniqueness across product + size + color + type. `STANDARD` represents an absent option and is hidden from customers. Batch variants require preset clothing sizes. Embroidery names belong to order lines and are required only when the batch product offers personalization.
+Products are CONTINUOUS or BATCH, with DRAFT/PUBLISHED/ARCHIVED status. Each has at least one variant. The ordered `image_keys` array stores up to eight photo URLs without adding a table. Its first entry is also stored in legacy `image_key` for existing clients; clearing the gallery clears both. The additive migration backfills existing cover URLs. Admin forms upload files; legacy HTTPS image references remain readable and accepted by existing API clients. Size/color/type values are normalized before enforcing uniqueness across product + size + color + type. `STANDARD` represents an absent option and is hidden from customers. Batch variants require preset clothing sizes. Embroidery names belong to order lines and are required only when the batch product offers personalization.
 
 SKU generation is server-side and immutable. Existing API clients may supply an explicit SKU. Price, category, profile, and payment-method changes do not rewrite historical snapshots. Variant options can change only before any order history exists; price and active state remain editable.
 
@@ -48,7 +48,7 @@ Inventory balances reconcile to ledger deltas. Stock movements are append-only; 
 
 ## Retention and announcements
 
-Permanent product deletion is limited to unused DRAFT products with no batches, orders, stock, or ledger history. Other products are archived. A variant may be deleted only if it has no order history and is not the last variant; its stock history retains the SKU and detaches the variant reference. Disable referenced payment methods rather than deleting them.
+Permanent product deletion is allowed in any publication state unless any associated order has a verified payment (including a deposit) or an unresolved submitted proof. It cancels entire unpaid orders, releases their reservations, deletes catalog variants/batches, and retains order descriptions, prices, embroidery and ledger snapshots with nullable catalog references. Resolve proofs first; archive products with verified payments. A variant may be deleted only if it has no order history and is not the last variant; its stock history retains the SKU and detaches the variant reference. Disable referenced payment methods rather than deleting them.
 
 Announcements are separate from batches. Public messages must be published and within optional start/end dates; end must follow start. Legacy batch announcement text was retained and copied into drafts for review/publishing.
 
@@ -56,4 +56,4 @@ Announcements are separate from batches. Public messages must be published and w
 
 Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:check`. The checker verifies migrations/tables, product/batch relationships, historical embroidery validity, inventory reconciliation, roles, and verified totals.
 
-Commit migration files. Back up PostgreSQL and private receipts before changing a populated store; rehearse on a restored isolated copy. Never reset a populated database to apply an additive migration. The historical `20261030000000_minimal_ekraf` fresh-start transition refuses populated legacy data; later migrations preserve the current model's records. Recovery and retention responsibilities are in [Operations](OPERATIONS.md).
+Commit migration files. Back up PostgreSQL, public media, and private receipts before changing a populated store; rehearse on a restored isolated copy. Never reset a populated database to apply an additive migration. The historical `20261030000000_minimal_ekraf` fresh-start transition refuses populated legacy data; later migrations preserve the current model's records. Recovery and retention responsibilities are in [Operations](OPERATIONS.md).

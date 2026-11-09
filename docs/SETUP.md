@@ -36,8 +36,8 @@ The script refuses to create another admin once one exists. Public registration 
 
 ## Configure the store
 
-- **Payment Settings:** add official QRIS or bank account details. Product and QRIS images use HTTPS URLs.
-- **Products:** create a product and its first variant, then publish it. Categories include standard choices and Other. Each variant represents one size/color/type combination with its own price, stock, active flag, and automatically generated immutable SKU.
+- **Payment Settings:** add official QRIS or bank account details. Upload a clear QRIS image (JPG, PNG, or WebP, up to 10 MB); it is stored losslessly. Bank account fields stay unchanged.
+- **Products:** create a product and its first variant, then publish it. Select up to eight image files (JPG, PNG, or WebP, up to 10 MB each), preview them, remove unwanted photos, and use Make cover to choose the first image. Photos upload when the form is saved. Shop cards show the cover photo and open product details. Product details provide swipe navigation, unboxed < / > arrows, and thumbnails for all available photos. Categories include standard choices and Other. Each variant represents one size/color/type combination with its own price, stock, active flag, and automatically generated immutable SKU.
 - **Options:** enter one plain-text color/type per variant; blank means no option. Continuous products may omit all options. Batch products require a preset size and zero initial stock; embroidery is controlled by the product's Require an embroidery name checkbox.
 - **Batches:** create an order window and production estimate in whole weeks. Multiple batches can be open independently. Receive delivered stock through the batch editor; use reasoned stock adjustments for continuous products.
 - **Announcements:** publish store news, maintenance, sales, or pickup instructions independently of batches. Optional start/end dates control visibility. Home rotates messages every six seconds and refreshes within 30 seconds or on window focus. The bell opens `/announcements`.
@@ -57,6 +57,7 @@ Use [.env.example](../.env.example) as the normal configuration reference. [The 
 | `API_INTERNAL_ORIGIN` | Next.js API rewrite destination, set before build/start; normally `http://localhost:3000`. |
 | `API_PORT`, `API_HOST` | API port and bind address; defaults 3000 and `0.0.0.0`. |
 | `ADMIN_PANEL_PATH` | Server-only private URL segment; never prefix with `NEXT_PUBLIC_`. |
+| `MEDIA_STORAGE_DIR` | Persistent public product/QRIS image storage; defaults to `storage/media` relative to the API working directory. Keep it separate from private receipts. |
 | `RECEIPT_STORAGE_DIR` | Private persistent receipt directory; defaults to `storage/receipts` from the API working directory. |
 | `NODE_ENV` | Development, test, or production; production uses Secure cookies. |
 | `NEXT_PUBLIC_SUPPORT_WHATSAPP`, `NEXT_PUBLIC_PAYMENT_REVIEW_HOURS` | Public pickup/payment support details. |

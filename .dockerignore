@@ -1,0 +1,26 @@
+**
+!package.json
+!package-lock.json
+!api/
+!api/package.json
+!api/tsconfig.json
+!api/prisma.config.ts
+!api/prisma/**
+!api/src/**
+!web/
+!web/package.json
+!web/tsconfig.json
+!web/next.config.ts
+!web/public/**
+!web/src/**
+api/src/generated/
+
+# Explicit exclusions for local artifacts inside workspace directories.
+**/node_modules
+**/.env
+**/.env.*
+api/dist
+api/storage
+web/.next*
+web/public/test-fixtures
+web/tsconfig.tsbuildinfo

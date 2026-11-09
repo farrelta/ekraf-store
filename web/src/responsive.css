@@ -265,8 +265,8 @@
     font-size: 11px;
   }
   .product-grid {
-    grid-template-columns: 1fr;
-    gap: 30px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 12px;
   }
   .tile-image {
     aspect-ratio: 4/3;
@@ -1176,4 +1176,15 @@ input,select,textarea,.form-error-summary {scroll-margin-block:110px;}
     padding:8px 12px;
     white-space:nowrap;
   }
+}
+
+@media(max-width:767px) {
+  .shop-container .product-tile h3 { font-size:16px; }
+  .shop-container .tile-meta { gap:8px; }
+  .shop-container .tile-meta small { min-width:0; overflow-wrap:anywhere; }
+  .shop-container .product-tile .image-placeholder span { display:none; }
+}
+
+@media(max-width:767px) {
+  .store-shell .collection-controls :is(select,.segmented button) { font-size:11px; }
 }

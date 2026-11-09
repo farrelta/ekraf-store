@@ -12,6 +12,7 @@ import argon2 from "argon2";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { configureObjectStorage } from "./object-storage.js";
 import { registerStoreRoutes } from "./store-routes.js";
 import { allowedOrigins } from "./origin-policy.js";
 
@@ -27,7 +28,14 @@ const config = z.object({
   ADMIN_BOOTSTRAP_TOKEN: z.string().optional()
 }).parse(process.env);
 
-const pool = new Pool({ connectionString: config.DATABASE_URL });
+const pool = new Pool({ connectionString: config.DATABASE_URL, max: 5, connectionTimeoutMillis: 5000 });
+if (process.env.DB_POOL_LOG === "true") {
+  setInterval(() => {
+    console.info("[api] db_pool", {
+      total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount,
+    });
+  }, 1000).unref();
+}
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 const app = express();
 const PgStore = pgSession(session);
@@ -152,7 +160,7 @@ app.post("/api/admin/bootstrap", authLimiter, async (req, res) => {
 });
 
 
-const store = registerStoreRoutes(app, prisma, requireUser, admin);
+const store = registerStoreRoutes(app, prisma, requireUser, admin, configureObjectStorage());
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid input", details: error.issues.map(issue => ({ path: issue.path.join("."), message: issue.message })) });
   if (error?.type === "entity.too.large") return res.status(413).json({ error: "Receipt must be at most 5 MB" });

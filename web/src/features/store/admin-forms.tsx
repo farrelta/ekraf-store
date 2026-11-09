@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ImageUpload, resolveImageUploads } from "./image-upload";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode, type FormEvent } from "react";
 import { FormFeedback, FieldError } from "./form-feedback";
@@ -115,7 +116,7 @@ export function ProductEditor({ id }: { id?: string }) {
     finally { setDeletingVariant(null); }
   }
   async function deleteProduct() {
-    if (deleting || !window.confirm(`Permanently delete "${p.name}" and its variants? This cannot be undone.`)) return;
+    if (deleting || !window.confirm(`Permanently delete "${p.name}" and its variants and batches? Unpaid orders containing this product, including their other items, will be cancelled. Order snapshots and stock history are retained. This cannot be undone.`)) return;
     setDeleting(true);
     try {
       await api(`/api/admin/products/${id}`, { method: "DELETE" });
@@ -146,7 +147,7 @@ export function ProductEditor({ id }: { id?: string }) {
                 name: get(f, "name"),
                 description: get(f, "description"),
                 category: category(f),
-                imageKey: get(f, "imageKey") || null,
+                imageKeys: await resolveImageUploads(f, "imageKeys", api),
                 status: get(f, "status"),
                 featured: f.get("featured") === "on",
                 embroideryRequired: f.get("embroideryRequired") === "on",
@@ -208,12 +209,7 @@ export function ProductEditor({ id }: { id?: string }) {
                   </select>
                 </label>
               </div>
-              <Field
-                label="Product image URL (HTTPS)"
-                name="imageKey"
-                value={p?.imageKey || ""}
-                type="url"
-              />
+              <ImageUpload name="imageKeys" label="Product images" multiple initial={p?.imageKeys?.length ? p.imageKeys : p?.imageKey ? [p.imageKey] : []}/>
               <label className="check-label">
                 <input
                   type="checkbox"
@@ -222,9 +218,6 @@ export function ProductEditor({ id }: { id?: string }) {
                 />{" "}
                 Feature in the collection
               </label>
-              {p?.imageKey && (
-                <img className="editor-preview" src={p.imageKey} alt={p.name} />
-              )}
             </section>
             {!id && (
               <section className="panel form-section">
@@ -271,7 +264,7 @@ export function ProductEditor({ id }: { id?: string }) {
                     <fieldset disabled={v.hasOrderHistory}>
                       <p className="muted">{v.hasOrderHistory ? "Size, color and type are locked because this variant has order history." : "Edit options before this variant has orders. SKU and stock stay unchanged."}</p>
                       <div className="form-grid">
-                        <label>Size<select name="size" aria-label="Size" defaultValue={v.size}>{[...new Set([...options.sizes,v.size])].filter(size => p.sellingType !== "BATCH" || size !== "STANDARD").map(size => <option key={size} value={size}>{size === "STANDARD" ? "No size" : size}</option>)}</select></label>
+                        <label>Size<select name="size" aria-label="Size" defaultValue={v.size}>{[...new Set([...options.sizes,v.size])].map(size => <option key={size} value={size}>{size === "STANDARD" ? "No size" : size}</option>)}</select></label>
                         <label>Color<input name="color" defaultValue={v.color === "STANDARD" ? "" : v.color} maxLength={160}/><FieldError name="color"/></label>
                         <label>Type<input name="type" defaultValue={v.type === "STANDARD" ? "" : v.type} maxLength={160}/><FieldError name="type"/></label>
                       </div>
@@ -371,7 +364,7 @@ export function ProductEditor({ id }: { id?: string }) {
               )}
             </>
           )}
-          {p && <section className="panel form-section"><h2>Permanent deletion</h2><p>Only unused drafts with no batches, orders, stock, or stock history can be deleted. Archive other products to preserve their records.</p><button type="button" className="button-danger" disabled={deleting || p.status !== "DRAFT"} onClick={() => void deleteProduct()}>{deleting ? "Deleting…" : "Permanently delete product"}</button></section>}
+          {p && <section className="panel form-section"><h2>Permanent deletion</h2>{p.deletionBlockedReason && <p className="info-note">{p.deletionBlockedReason}</p>}<p>Products with verified payments, including deposits, cannot be deleted. Resolve pending proofs first. Unpaid orders containing this product will be cancelled, including their other items; order snapshots and stock history are retained.</p><button type="button" className="button-danger" disabled={deleting || !!p.deletionBlockedReason} title={p.deletionBlockedReason || undefined} onClick={() => void deleteProduct()}>{deleting ? "Deleting…" : "Permanently delete product"}</button></section>}
         </>
       )}
     </State>
@@ -425,7 +418,7 @@ export function BatchEditor({ id }: { id?: string }) {
                 ...(editable && (!b || get(f, "opensAt") !== localInput(b.opensAt)) ? { opensAt: new Date(get(f, "opensAt")).toISOString() } : {}),
                 ...(editable && (!b || get(f, "closesAt") !== localInput(b.closesAt)) ? { closesAt: new Date(get(f, "closesAt")).toISOString() } : {}),
               };
-              if (id) await mutate(`/api/admin/batches/${id}`, fields, "PATCH");
+              if (id) await mutate(`/api/admin/batches/${id}`, { ...fields, ...(editable ? { name: get(f, "name") } : {}) }, "PATCH");
               else {
                 const r = await mutate("/api/admin/batches", {
                   ...fields,
@@ -471,9 +464,8 @@ export function BatchEditor({ id }: { id?: string }) {
                 </>
               ) : (
                 <>
-                  <h3>
-                    {p.name} · {b.name}
-                  </h3>
+                  <h3>{p.name}</h3>
+                  {editable ? <Field label="Batch name" name="name" value={b.name} required /> : <p>{b.name}</p>}
                   <p className="muted">
                     Prices follow the product variants. Existing orders retain
                     their charged prices.
@@ -535,6 +527,20 @@ export function BatchEditor({ id }: { id?: string }) {
               {id ? "Save batch" : "Create batch order"}
             </button>
           </ActionForm>
+          {b?.production && (
+            <section className="panel form-section">
+              <h2>Confirmed production quantities</h2>
+              <p>Includes fully paid and deposit-paid orders.</p>
+              <p>{b.production.unpaidOrders} unpaid · {b.production.awaitingReview} awaiting payment review</p>
+              {b.production.variants.length ? (
+                <ul>
+                  {b.production.variants.map((variant: { id: string; sku: string; options: string; units: number }) => (
+                    <li key={variant.id}>{variant.options} · {variant.sku} — {variant.units} units</li>
+                  ))}
+                </ul>
+              ) : <p>No confirmed units yet.</p>}
+            </section>
+          )}
           {b && ["CLOSED", "IN_PRODUCTION", "READY"].includes(b.status) && (
             <ActionForm
               submit={(f) =>
@@ -592,12 +598,12 @@ export function PaymentSettings() {
   return (
     <State loading={loading} error={error} retry={reload}>
       <ActionForm
-        submit={(f) =>
+        submit={async (f) =>
           mutate("/api/admin/payment-methods", {
             name: get(f, "name"),
             type,
             instructions: get(f, "instructions"),
-            qrImageKey: get(f, "qrImageKey") || null,
+            qrImageKey: type === "QRIS" ? (await resolveImageUploads(f, "qrImageKey", api))[0] || null : null,
             bankName: get(f, "bankName") || null,
             accountName: get(f, "accountName") || null,
             accountNumber: get(f, "accountNumber") || null,
@@ -620,12 +626,7 @@ export function PaymentSettings() {
               </select>
             </label>
             {type === "QRIS" ? (
-              <Field
-                label="QRIS image URL (HTTPS)"
-                name="qrImageKey"
-                type="url"
-                required
-              />
+              <ImageUpload name="qrImageKey" label="QRIS image" required/>
             ) : (
               <>
                 <Field label="Bank" name="bankName" required />
@@ -652,6 +653,7 @@ export function PaymentSettings() {
               ? "QRIS"
               : `${m.bankName} · ${m.accountNumber} · ${m.accountName}`}
           </p>
+          {m.type === "QRIS" && m.qrImageKey && <img className="qris-admin-preview" src={m.qrImageKey} alt={`${m.name} QRIS code`}/>}
           <ActionForm
             submit={() =>
               mutate(

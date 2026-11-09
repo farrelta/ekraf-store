@@ -9,18 +9,23 @@ import { canTransitionFulfillment } from "./order-policy.js";
 import { registerQueryRoutes } from "./store-queries.js";
 import { catalogOptions, createWithSkus, optionSchema } from "./catalog.js";
 
+import { imageReference, productImages, registerImageRoutes, validateImageReference } from "./images.js";
+
 const param = (req: Request, name: string) => String(req.params[name] ?? "");
 const text = z.string().trim().min(1).max(160);
 const money = z.union([z.string(), z.number()]).transform(String).refine(v => /^\d{1,9}(\.\d{1,2})?$/.test(v) && Number(v) > 0, "Use a positive amount with at most two decimal places");
-const image = z.string().url().max(2048).refine(v => v.startsWith("https://"), "Use an HTTPS image URL").nullable().optional();
+const image = imageReference.nullable().optional();
 const variantSchema = z.object({ sku: text.optional(), size: optionSchema, color: optionSchema, type: optionSchema, price: money, onHand: z.number().int().min(0).max(100000).default(0) });
-const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false), embroideryRequired: z.boolean().default(true) });
+const productFields = z.object({ name: text, category: text.nullable().optional(), description: z.string().max(5000).default(""), imageKey: image, imageKeys: z.array(imageReference).max(8).optional(), sellingType: z.enum(["CONTINUOUS", "BATCH"]), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"), featured: z.boolean().default(false), embroideryRequired: z.boolean().default(true) });
 const productInclude = { variants: { orderBy: { sku: "asc" as const } }, batches: { orderBy: { closesAt: "desc" as const } } };
-const receiptDirectory = path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
+import type { ObjectStorage } from "./object-storage.js";
+
+const receiptDirectory = () => path.resolve(process.env.RECEIPT_STORAGE_DIR ?? "storage/receipts");
 const normalizeVariant = (v: z.output<typeof variantSchema> & { sku: string }) => ({ ...v, price: new Prisma.Decimal(v.price) });
 
-export function registerStoreRoutes(app: Express, db: PrismaClient, auth: RequestHandler, admin: RequestHandler) {
+export function registerStoreRoutes(app: Express, db: PrismaClient, auth: RequestHandler, admin: RequestHandler, storage: ObjectStorage) {
   app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  registerImageRoutes(app, admin, storage);
   registerQueryRoutes(app, db, auth, admin);
   const announcementSchema = z.object({ title: text, body: z.string().trim().min(1).max(10000), published: z.boolean().default(false), startsAt: z.iso.datetime().nullable().default(null), endsAt: z.iso.datetime().nullable().default(null) }).refine(v => !v.startsAt || !v.endsAt || new Date(v.startsAt) < new Date(v.endsAt), "End must follow start");
   app.get("/api/announcements", async (_req,res) => {
@@ -34,9 +39,10 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   app.get("/api/admin/catalog-options", admin, (_req, res) => res.json(catalogOptions));
   app.post("/api/admin/products", admin, async (req, res) => {
     const { variants, ...data } = productFields.extend({ variants: z.array(variantSchema).min(1).max(100) }).parse(req.body);
-    if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || v.size === "STANDARD" || !catalogOptions.sizes.includes(v.size))) fail("Batch products need a preset clothing size and start with zero ready stock", 400);
+    if (data.sellingType === "BATCH" && variants.some(v => v.onHand > 0 || !catalogOptions.sizes.includes(v.size))) fail("Batch products must use a supported size option and start with zero ready stock", 400);
+    const images = await productImages(data, storage);
     const product = await createWithSkus(db, variants, assigned => transaction(db, async tx => {
-      const created = await tx.product.create({ data });
+      const created = await tx.product.create({ data: { ...data, ...images } });
       for (const v of assigned) {
         const variant = await tx.productVariant.create({ data: { ...normalizeVariant(v), productId: created.id, onHand: 0 } });
         if (v.onHand > 0) await move(tx, { variantId: variant.id, actorId: req.session.userId!, type: "ADJUSTMENT", onHandDelta: v.onHand, reservedDelta: 0, reason: "Initial stock" });
@@ -47,7 +53,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   });
   app.patch("/api/admin/products/:id", admin, async (req, res) => {
     const data = productFields.omit({ sellingType: true }).partial().extend({ description: z.string().max(5000).optional(), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(), featured: z.boolean().optional(), embroideryRequired: z.boolean().optional() }).parse(req.body);
-    const product = await db.product.update({ where: { id: param(req, "id") }, data, include: productInclude });
+    const product = await db.product.update({ where: { id: param(req, "id") }, data: { ...data, ...await productImages(data, storage) }, include: productInclude });
     res.json({ product });
   });
   app.delete("/api/admin/products/:id", admin, async (req, res) => {
@@ -55,14 +61,13 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       const productId = param(req, "id");
       const product = await tx.product.findUnique({ where: { id: productId } });
       if (!product) return fail("Product not found", 404);
-      if (product.status !== "DRAFT") fail("Only unused drafts can be permanently deleted. Archive this product instead.");
-      const [batches, items, movements, stock] = await Promise.all([
-        tx.batch.count({ where: { productId } }),
-        tx.orderItem.count({ where: { variant: { productId } } }),
-        tx.inventoryMovement.count({ where: { variant: { productId } } }),
-        tx.productVariant.count({ where: { productId, OR: [{ onHand: { not: 0 } }, { reserved: { not: 0 } }] } }),
-      ]);
-      if (batches || items || movements || stock) fail("This product has batches, orders, stock, or stock history. Archive it instead.");
+      // Serialize against other catalog mutations; payment/order writes share this serializable transaction.
+      await tx.product.update({ where: { id: productId }, data: { updatedAt: new Date() } });
+      const orders = await tx.order.findMany({ where: { items: { some: { variant: { productId } } } }, include: { paymentSubmissions: true } });
+      if (orders.some(order => order.paymentSubmissions.some(proof => proof.status === "VERIFIED") || ["PAID", "PARTIALLY_PAID"].includes(order.paymentStatus))) fail("This product has verified payment history, including deposits. Archive it instead.");
+      if (orders.some(order => order.paymentSubmissions.some(proof => proof.status === "SUBMITTED"))) fail("Resolve pending payment proofs before permanently deleting this product.");
+      for (const order of orders) if (order.paymentStatus === "PENDING") await releaseOrder(tx, order.id, "CANCELLED", req.session.userId!);
+      await tx.batch.deleteMany({ where: { productId } });
       await tx.productVariant.deleteMany({ where: { productId } });
       await tx.product.delete({ where: { id: productId } });
     });
@@ -73,7 +78,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     const variant = await createWithSkus(db, [data], ([assigned]) => transaction(db, async tx => {
       if (!assigned) throw new Error("Variant assignment missing");
       const product = await tx.product.findUniqueOrThrow({ where: { id: param(req, "id") } });
-      if (product.sellingType === "BATCH" && (data.onHand || data.size === "STANDARD" || !catalogOptions.sizes.includes(data.size))) fail("Batch variants need a preset clothing size and zero initial stock", 400);
+      if (product.sellingType === "BATCH" && (data.onHand || !catalogOptions.sizes.includes(data.size))) fail("Batch variants must use a supported size option and zero initial stock", 400);
       const created = await tx.productVariant.create({ data: { ...normalizeVariant(assigned), productId: product.id, onHand: 0 } });
       if (data.onHand) await move(tx, { variantId: created.id, actorId: req.session.userId!, type: "ADJUSTMENT", onHandDelta: data.onHand, reservedDelta: 0, reason: "Initial stock" });
       return created;
@@ -103,7 +108,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       await tx.product.update({ where: { id: current.productId }, data: { updatedAt: new Date() } });
       const changed = (["size", "color", "type"] as const).some(field => data[field] !== undefined && data[field] !== current[field]);
       if (changed && await tx.orderItem.count({ where: { variantId: current.id } })) fail("Variants with order history cannot change size, color or type. Add another variant instead.");
-      if (data.size !== undefined && data.size !== current.size && current.product.sellingType === "BATCH" && (data.size === "STANDARD" || !catalogOptions.sizes.includes(data.size))) fail("Batch variants require a preset clothing size", 400);
+      if (data.size !== undefined && data.size !== current.size && current.product.sellingType === "BATCH" && (!catalogOptions.sizes.includes(data.size))) fail("Batch variants must use a supported size option", 400);
       return tx.productVariant.update({ where: { id: current.id }, data: { ...data, ...(data.price ? { price: new Prisma.Decimal(data.price) } : {}) } });
     });
     res.json({ variant });
@@ -125,16 +130,19 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     if (new Date(data.opensAt) >= new Date(data.closesAt)) fail("Opening must precede closing", 400);
     if (new Date(data.closesAt) <= new Date()) fail("Choose a future closing date", 400);
     const batch = await transaction(db, async tx => {
-      const p = await tx.product.findUniqueOrThrow({ where: { id: data.productId } });
+      const p = await tx.product.findUniqueOrThrow({ where: { id: data.productId }, include: { variants: { where: { active: true }, take: 1 } } });
+      if (data.status === "OPEN" && (p.status !== "PUBLISHED" || !p.variants.length)) fail("Publish the product and activate at least one variant before opening the batch");
       if (p.sellingType !== "BATCH") fail("Choose a batch product", 400);
       return tx.batch.create({ data });
     });
     res.status(201).json({ batch });
   });
   app.patch("/api/admin/batches/:id", admin, async (req, res) => {
-    const data = z.object({ status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional(), opensAt: z.iso.datetime().optional(), closesAt: z.iso.datetime().optional(), productionWeeks: z.number().int().min(1).max(52).optional() }).parse(req.body);
+    const data = z.object({ name: text.optional(), status: z.enum(["DRAFT", "OPEN", "CLOSED", "IN_PRODUCTION", "READY", "COMPLETED", "CANCELLED"]).optional(), announcement: z.string().max(2000).optional(), opensAt: z.iso.datetime().optional(), closesAt: z.iso.datetime().optional(), productionWeeks: z.number().int().min(1).max(52).optional() }).parse(req.body);
     const batch = await transaction(db, async tx => {
       const current = await tx.batch.findUniqueOrThrow({ where: { id: param(req, "id") } });
+      if (data.name !== undefined && data.name !== current.name && !["DRAFT", "OPEN"].includes(current.status)) fail("Batch names can only change while draft or open");
+      if (data.status === "OPEN" && current.status !== "OPEN" && !await tx.product.count({ where: { id: current.productId, status: "PUBLISHED", variants: { some: { active: true } } } })) fail("Publish the product and activate at least one variant before opening the batch");
       const windowChanged = (data.opensAt !== undefined && new Date(data.opensAt).getTime() !== current.opensAt.getTime()) ||
         (data.closesAt !== undefined && new Date(data.closesAt).getTime() !== current.closesAt.getTime());
       if (windowChanged) {
@@ -145,6 +153,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (data.status && data.status !== current.status && !batchTransitions[current.status]?.includes(data.status)) fail("Invalid batch transition");
       if (data.status === "OPEN" && current.status !== "OPEN" && new Date(data.closesAt ?? current.closesAt) <= new Date()) fail("Choose a future closing date before opening the batch", 400);
       if (data.status === "CANCELLED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID", "PENDING"] } } } })) fail("Resolve existing orders before cancelling a batch");
+      if (data.status === "COMPLETED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: "PENDING" } } })) fail("Resolve pending orders before completing this batch");
       if (data.status === "COMPLETED" && await tx.orderItem.count({ where: { batchId: current.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID"] } }, pickupStatus: { not: "COMPLETED" } } })) fail("Orders still await pickup");
       return tx.batch.update({ where: { id: current.id }, data });
     });
@@ -172,6 +181,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
   });
   app.post("/api/admin/payment-methods", admin, async (req, res) => {
     const data = methodSchema.parse(req.body);
+    if (data.type === "QRIS" && data.qrImageKey) await validateImageReference(data.qrImageKey, "qris", storage);
     res.status(201).json({ method: await db.paymentMethod.create({ data: { ...data, ...(data.type === "QRIS" ? { bankName: null, accountName: null, accountNumber: null } : { qrImageKey: null }) } }) });
   });
   app.patch("/api/admin/payment-methods/:id", admin, async (req, res) => {
@@ -191,7 +201,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
         const v = await tx.productVariant.findUniqueOrThrow({ where: { id: item.variantId }, include: { product: true } });
         if (!v.active || v.product.status !== "PUBLISHED") fail("A selected variant is unavailable");
         if (batch ? v.productId !== batch.productId || v.product.sellingType !== "BATCH" : v.product.sellingType !== "CONTINUOUS") fail("Select a valid batch for every batch product, and no batch for merchandise", 400);
-        if (batch ? v.size === "STANDARD" || (v.product.embroideryRequired && !item.embroideryName) || (!v.product.embroideryRequired && !!item.embroideryName) : !!item.embroideryName) fail("Choose a preset batch size and provide an embroidery name only when offered", 400);
+        if (batch ? (v.product.embroideryRequired && !item.embroideryName) || (!v.product.embroideryRequired && !!item.embroideryName) : !!item.embroideryName) fail("Provide an embroidery name only when offered", 400);
         lines.push({ batchId: batch?.id ?? null, variantId: v.id, quantity: item.quantity, embroideryName: item.embroideryName ?? null, itemDescription: `${v.product.name} · ${[v.size,v.color,v.type].filter(x => x !== "STANDARD").join(" / ") || "Standard"} · ${v.sku}`, unitPrice: v.price });
       }
       const continuous = total(lines.filter(i => !i.batchId));
@@ -199,7 +209,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (data.paymentPlan === "BATCH_DEPOSIT" && batchTotal.isZero()) fail("A deposit is available only when the order contains batch items", 400);
       const initialAmount = continuous.add(data.paymentPlan === "BATCH_DEPOSIT" ? batchTotal.mul("0.5").toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) : batchTotal);
       const order = await tx.order.create({ data: { userId: req.session.userId!, paymentPlan: data.paymentPlan, initialAmount, idempotencyKey: key, customerName: data.customerName, customerPhone: data.customerPhone, expiresAt: new Date(Date.now() + 24 * 3600000), items: { create: lines } }, include: { items: true } });
-      for (const item of order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId, orderId: order.id, orderItemId: item.id, type: "RESERVATION", onHandDelta: 0, reservedDelta: item.quantity, reason: "Checkout reservation" });
+      for (const item of order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId ?? fail("This order item no longer has a catalog variant"), orderId: order.id, orderItemId: item.id, type: "RESERVATION", onHandDelta: 0, reservedDelta: item.quantity, reason: "Checkout reservation" });
       return tx.order.findUniqueOrThrow({ where: { id: order.id }, include: orderInclude });
     });
     try { res.status(201).json({ order: orderDto(await create()) }); }
@@ -227,8 +237,14 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
     const jpg = buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255;
     if (!png && !jpg) fail("Invalid receipt image", 400);
     const key = `${randomUUID()}.${png ? "png" : "jpg"}`;
-    await mkdir(receiptDirectory, { recursive: true });
-    await writeFile(path.join(receiptDirectory, key), buffer, { flag: "wx" });
+    if (storage) {
+      // Reject unauthorized writes before sending anything to the bucket.
+      if (!await db.order.count({ where: { id: param(req, "id"), userId: req.session.userId } })) fail("Order not found", 404);
+      await storage.put("receipt", key, buffer, png ? "image/png" : "image/jpeg");
+    } else {
+      await mkdir(receiptDirectory(), { recursive: true });
+      await writeFile(path.join(receiptDirectory(), key), buffer, { flag: "wx" });
+    }
     try {
       const submission = await transaction(db, async tx => {
         const order = await tx.order.findUniqueOrThrow({ where: { id: param(req, "id") }, include: orderInclude });
@@ -240,14 +256,19 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
         return tx.paymentSubmission.create({ data: { orderId: order.id, paymentMethodId: method.id, methodSnapshot: { name: method.name, type: method.type, instructions: method.instructions, qrImageKey: method.qrImageKey, bankName: method.bankName, accountName: method.accountName, accountNumber: method.accountNumber }, phase: due.phase, amount: new Prisma.Decimal(due.amountDue), transactionReference: reference || null, proofKey: key } });
       });
       res.status(202).json({ submission: { id: submission.id, status: submission.status } });
-    } catch (error) { await unlink(path.join(receiptDirectory, key)).catch(() => {}); throw error; }
+    } catch (error) { await (storage ? storage.removeReceipt(key) : unlink(path.join(receiptDirectory(), key))).catch(() => console.error("[api] receipt_cleanup_failed")); throw error; }
   });
   app.get("/api/payment-submissions/:id/proof", auth, async (req, res) => {
     const s = await db.paymentSubmission.findUniqueOrThrow({ where: { id: param(req, "id") }, include: { order: { select: { userId: true } } } });
     if (req.session.role !== "ADMIN" && s.order.userId !== req.session.userId) fail("Receipt not found", 404);
     if (!/^[a-f0-9-]+\.(png|jpg)$/.test(s.proofKey)) fail("Receipt unavailable", 404);
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.sendFile(path.join(receiptDirectory, s.proofKey));
+    if (storage) {
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.redirect(302, await storage.receiptUrl(s.proofKey));
+      return;
+    }
+    res.sendFile(path.join(receiptDirectory(), s.proofKey));
   });
   app.post("/api/admin/payment-submissions/:id/review", admin, async (req, res) => {
     const data = z.object({ action: z.enum(["VERIFIED", "REJECTED"]), reason: z.string().trim().max(1000).default(""), reference: z.string().trim().max(200).default("") }).parse(req.body);
@@ -263,7 +284,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
         return;
       }
       if (s.phase === "INITIAL") {
-        for (const item of s.order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId, orderId: s.orderId, orderItemId: item.id, actorId: req.session.userId!, type: "SALE", onHandDelta: -item.quantity, reservedDelta: -item.quantity, reason: "Initial payment verified" });
+        for (const item of s.order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId ?? fail("This order item no longer has a catalog variant"), orderId: s.orderId, orderItemId: item.id, actorId: req.session.userId!, type: "SALE", onHandDelta: -item.quantity, reservedDelta: -item.quantity, reason: "Initial payment verified" });
         await tx.orderItem.updateMany({ where: { orderId: s.orderId, pickupStatus: "PENDING" }, data: { pickupStatus: "PROCESSING" } });
       }
       const paid = new Prisma.Decimal(due.paidAmount).add(s.amount);
@@ -280,7 +301,7 @@ export function registerStoreRoutes(app: Express, db: PrismaClient, auth: Reques
       if (item.batchId && status === "READY_FOR_PICKUP") fail("Receive batch stock to make this item ready");
       if (item.batchId && status === "COMPLETED") {
         if (item.order.paymentStatus !== "PAID") fail("Verify the remaining batch balance before pickup");
-        await move(tx, { variantId: item.variantId, orderId: item.orderId, orderItemId: item.id, batchId: item.batchId, actorId: req.session.userId!, type: "SALE", onHandDelta: -item.quantity, reservedDelta: -item.quantity, reason: "Batch item collected" });
+        await move(tx, { variantId: item.variantId ?? fail("This order item no longer has a catalog variant"), orderId: item.orderId, orderItemId: item.id, batchId: item.batchId, actorId: req.session.userId!, type: "SALE", onHandDelta: -item.quantity, reservedDelta: -item.quantity, reason: "Batch item collected" });
       }
       await tx.orderItem.update({ where: { id: item.id }, data: { pickupStatus: status } });
     });

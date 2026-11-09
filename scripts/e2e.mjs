@@ -29,7 +29,7 @@ function environment() {
   const url = new URL(env.DATABASE_URL);
   if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/" + databaseName)
     throw new Error("Refusing to use a database outside the dedicated local test environment.");
-  return { ...process.env, ...env, NODE_ENV: "development" };
+  return { ...process.env, ...env, MEDIA_STORAGE_DIR: env.MEDIA_STORAGE_DIR ?? path.join(directory, "media"), NODE_ENV: "development" };
 }
 function connection(databaseUrl) {
   const pool = new Pool({ connectionString: databaseUrl });

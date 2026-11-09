@@ -196,3 +196,8 @@ These checks cover date-aware batch selection, persistent field-linked validatio
 ## Responsive interaction checks
 
 After `npm run e2e:prepare` and starting the isolated test frontend, run `python web/test/adapt.py`. It checks customer and admin layouts from 320 to 2560 pixels, phone landscape, mobile collection search, touch target sizes, quantity/cart persistence, and horizontal admin navigation by touch and keyboard, active-section visibility, and desktop sidebar behavior. It uses seeded catalog data and a test admin login; it does not save catalog changes or create orders. Screenshots are saved under ignored `api/storage/e2e/adapt/`. These are Chromium viewport and synthesized touch checks, not physical iOS/Android device results.
+
+
+## Product and QRIS image uploads
+
+Run `python web/test/images.py` with the isolated seeded E2E server running. It creates one temporary zero-stock product, uploads/removes/reorders real images, publishes the product for shop-cover/detail-gallery checks, and exercises detail thumbnails, unboxed arrows, keyboard, synthesized touch swipes, and responsive resizing. It then adds a clearly labeled test QRIS method. Cleanup deletes its unused product and disables its test payment method; uploaded test media stays in the ignored isolated media folder. No payment is made. The API integration suite additionally covers permission/CSRF checks, corrupt/oversized files, public caching, gallery limits, cover compatibility, and cross-purpose image rejection.

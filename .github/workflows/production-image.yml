@@ -1,0 +1,30 @@
+name: Build production image
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: VPS architecture
+        type: choice
+        options: [amd64, arm64]
+        default: amd64
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux release
+        env:
+          NEXT_PUBLIC_SUPPORT_WHATSAPP: ${{ vars.NEXT_PUBLIC_SUPPORT_WHATSAPP }}
+          NEXT_PUBLIC_PAYMENT_REVIEW_HOURS: ${{ vars.NEXT_PUBLIC_PAYMENT_REVIEW_HOURS || '24' }}
+        run: |
+          docker build --file deploy/Dockerfile --tag ekraf-store:release --build-arg NEXT_PUBLIC_SUPPORT_WHATSAPP --build-arg NEXT_PUBLIC_PAYMENT_REVIEW_HOURS .
+          docker save ekraf-store:release | gzip -1 > ekraf-store.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ekraf-store-${{ inputs.architecture }}
+          path: ekraf-store.tar.gz
+          retention-days: 7

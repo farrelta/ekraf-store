@@ -43,7 +43,7 @@ export async function allocateBatch(tx: Prisma.TransactionClient, orderId: strin
   for (const item of order.items.filter(i => i.batchId && i.pickupStatus === "PROCESSING")) {
     const received = await tx.inventoryMovement.aggregate({ where: { batchId: item.batchId, variantId: item.variantId }, _sum: { onHandDelta: true, reservedDelta: true } });
     if ((received._sum.onHandDelta ?? 0) - (received._sum.reservedDelta ?? 0) < item.quantity) continue;
-    await move(tx, { variantId: item.variantId, orderId, orderItemId: item.id, batchId: item.batchId!, type: "RESERVATION", onHandDelta: 0, reservedDelta: item.quantity, reason: "Allocate received batch stock" });
+    await move(tx, { variantId: item.variantId ?? fail("This order item no longer has a catalog variant"), orderId, orderItemId: item.id, batchId: item.batchId!, type: "RESERVATION", onHandDelta: 0, reservedDelta: item.quantity, reason: "Allocate received batch stock" });
     await tx.orderItem.update({ where: { id: item.id }, data: { pickupStatus: "READY_FOR_PICKUP" } });
   }
 }
@@ -51,7 +51,7 @@ export async function releaseOrder(tx: Prisma.TransactionClient, orderId: string
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
   if (order.paymentStatus !== "PENDING") fail("Only unpaid orders can be cancelled or expired");
   if (await tx.paymentSubmission.count({ where: { orderId, status: "SUBMITTED" } })) fail("Payment proof is awaiting review");
-  for (const item of order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId, orderId, orderItemId: item.id, actorId, type: "RELEASE", onHandDelta: 0, reservedDelta: -item.quantity, reason: state });
+  for (const item of order.items.filter(i => !i.batchId)) await move(tx, { variantId: item.variantId ?? fail("This order item no longer has a catalog variant"), orderId, orderItemId: item.id, actorId, type: "RELEASE", onHandDelta: 0, reservedDelta: -item.quantity, reason: state });
   await tx.orderItem.updateMany({ where: { orderId }, data: { pickupStatus: "CANCELLED" } });
   await tx.order.update({ where: { id: orderId }, data: { paymentStatus: state } });
 }

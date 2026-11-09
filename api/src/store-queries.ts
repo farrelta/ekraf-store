@@ -224,7 +224,9 @@ export function registerQueryRoutes(
       const p=await db.product.findUniqueOrThrow({where:{id:id(req)},include:productInclude});
       const referenced=await db.orderItem.groupBy({by:['variantId'],where:{variant:{productId:p.id}}});
       const ids=new Set(referenced.map(item=>item.variantId));
-      res.json({product:{...productDto(p),variants:p.variants.map(v=>({...v,hasOrderHistory:ids.has(v.id)}))}});
+      const orders=await db.order.findMany({where:{items:{some:{variant:{productId:p.id}}}},select:{paymentStatus:true,paymentSubmissions:{select:{status:true}}}});
+      const deletionBlockedReason=orders.some(o=>["PAID","PARTIALLY_PAID"].includes(o.paymentStatus)||o.paymentSubmissions.some(s=>s.status==="VERIFIED")) ? "This product has verified payment history, including deposits. Archive it instead." : orders.some(o=>o.paymentSubmissions.some(s=>s.status==="SUBMITTED")) ? "Resolve pending payment proofs before deleting this product." : null;
+      res.json({product:{...productDto(p),deletionBlockedReason,variants:p.variants.map(v=>({...v,hasOrderHistory:ids.has(v.id)}))}});
     },
   );
 
@@ -308,7 +310,7 @@ export function registerQueryRoutes(
       const ids = batches.map((b) => b.id);
       const stats = ids.length
         ? await db.$queryRaw<any[]>(
-            Prisma.sql`SELECT batch_id AS id,COUNT(DISTINCT order_id)::int AS orders,SUM(quantity)::int AS units,COALESCE(SUM(unit_price*quantity),0)::text AS value FROM order_items i JOIN orders o ON o.id=i.order_id WHERE batch_id IN (${Prisma.join(ids)}) AND o.payment_status NOT IN ('CANCELLED','EXPIRED') GROUP BY batch_id`,
+            Prisma.sql`SELECT batch_id AS id,COUNT(DISTINCT order_id)::int AS orders,SUM(quantity)::int AS units,COALESCE(SUM(unit_price*quantity),0)::text AS value FROM order_items i JOIN orders o ON o.id=i.order_id WHERE batch_id IN (${Prisma.join(ids)}) AND o.payment_status IN ('PAID','PARTIALLY_PAID') GROUP BY batch_id`,
           )
         : [];
       res.json({
@@ -341,17 +343,32 @@ export function registerQueryRoutes(
       });
       if (!b) return fail("Batch not found", 404);
       let actions: { status: string; blockedReason: string | null }[] | undefined;
+      let production;
       if (isAdmin) {
-        const [activeOrders, pendingPickups] = await Promise.all([
+        const [activeOrders, pendingPickups, pendingOrders, awaitingReview, confirmed] = await Promise.all([
           db.orderItem.count({ where: { batchId: b.id, order: { paymentStatus: { in: ["PENDING", "PARTIALLY_PAID", "PAID"] } } } }),
           db.orderItem.count({ where: { batchId: b.id, order: { paymentStatus: { in: ["PARTIALLY_PAID", "PAID"] } }, pickupStatus: { not: "COMPLETED" } } }),
+          db.order.count({ where: { paymentStatus: "PENDING", items: { some: { batchId: b.id } } } }),
+          db.order.count({ where: { paymentStatus: "PENDING", items: { some: { batchId: b.id } }, paymentSubmissions: { some: { status: "SUBMITTED" } } } }),
+          db.orderItem.groupBy({ by: ["variantId"], where: { batchId: b.id, order: { paymentStatus: { in: ["PAID", "PARTIALLY_PAID"] } } }, _sum: { quantity: true } }),
         ]);
+        production = {
+          unpaidOrders: pendingOrders - awaitingReview,
+          awaitingReview,
+          variants: b.product.variants.map(variant => ({
+            id: variant.id, sku: variant.sku,
+            options: [variant.size, variant.color, variant.type].filter(value => value !== "STANDARD").join(" / ") || "Standard",
+            units: confirmed.find(row => row.variantId === variant.id)?._sum.quantity ?? 0,
+          })).filter(variant => variant.units > 0),
+        };
         actions = (batchTransitions[b.status] || []).map(status => ({ status,
           blockedReason: status === "CANCELLED" && activeOrders > 0 ? "Resolve existing orders before cancelling this batch." :
+            status === "OPEN" && (b.product.status !== "PUBLISHED" || !b.product.variants.some(variant => variant.active)) ? "Publish the product and activate at least one variant before opening." :
+            status === "COMPLETED" && pendingOrders > 0 ? "Resolve pending orders before completing this batch." :
             status === "COMPLETED" && pendingPickups > 0 ? "Some paid items still await pickup." : null,
         }));
       }
-      res.json({ batch: { ...b, product: productDto(b.product), ...(isAdmin ? { actions } : {}) } });
+      res.json({ batch: { ...b, product: productDto(b.product), ...(isAdmin ? { actions, production } : {}) } });
     };
   app.get("/api/batches/:id", batchDetail(false));
   app.get("/api/admin/batches/:id", admin, batchDetail(true));

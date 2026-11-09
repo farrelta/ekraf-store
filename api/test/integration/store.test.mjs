@@ -1,4 +1,5 @@
 import test from "node:test";
+import sharp from "sharp";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -43,6 +44,7 @@ test(
         SESSION_SECRET: "integration-session-secret-at-least-32-characters",
         ALLOW_ADMIN_BOOTSTRAP: "false",
         RECEIPT_STORAGE_DIR: "storage/integration-receipts",
+        MEDIA_STORAGE_DIR: "storage/integration-media",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -302,7 +304,7 @@ test(
               variants: [{ price: "265000" }],
             })
           ).status,
-          400,
+          201,
         );
         assert.equal(
           (
@@ -549,6 +551,9 @@ test(
       assert.equal(picker.body.products[0].id, p.id);
       assert.equal((await alice.call("/admin/products?scope=catalog&type=BATCH")).status, 403);
       assert.equal((await admin.call(`/admin/variants/${p.variants[0].id}`, "PATCH", { price: "85000.75" })).status, 200);
+      const window = { productId: p.id, name: "Expired fixture", status: "OPEN", opensAt: new Date(Date.now()-60000).toISOString(), closesAt: new Date(Date.now()+60000).toISOString() };
+      assert.equal((await admin.call("/admin/batches", "POST", window)).status, 409);
+      assert.equal((await admin.call("/admin/products/"+p.id, "PATCH", { status: "PUBLISHED" })).status, 200);
       const createdBatch = await post(admin, "/admin/batches", { productId: p.id, name: "Expired fixture", status: "OPEN", opensAt: new Date(Date.now()-60000).toISOString(), closesAt: new Date(Date.now()+60000).toISOString() });
       const expired = await db.batch.update({ where: { id: createdBatch.batch.id }, data: { opensAt: new Date("2020-01-01T00:00:00Z"), closesAt: new Date("2020-02-01T00:00:00Z") } });
       const sameDates = { opensAt: expired.opensAt.toISOString(), closesAt: expired.closesAt.toISOString() };
@@ -1154,15 +1159,39 @@ test(
       assert.equal((await admin.call(path,'DELETE')).status,404);
       for(const status of ['PUBLISHED','ARCHIVED']){
         const p=(await post(admin,'/admin/products',{name:'Retained '+status,status,sellingType:'CONTINUOUS',variants:[{price:'1000'}]})).product;
-        assert.equal((await admin.call('/admin/products/'+p.id,'DELETE')).status,409);
+        assert.equal((await admin.call('/admin/products/'+p.id,'DELETE')).status,204);
       }
       const stock=(await post(admin,'/admin/products',{name:'Stock history draft',sellingType:'CONTINUOUS',variants:[{price:'1000',onHand:1}]})).product;
       await post(admin,'/admin/variants/'+stock.variants[0].id+'/stock',{onHand:0,reason:'Test adjustment'},200);
-      assert.equal((await admin.call('/admin/products/'+stock.id,'DELETE')).status,409);
+      assert.equal((await admin.call('/admin/products/'+stock.id,'DELETE')).status,204);
       await admin.call('/admin/products/'+batchProduct.id,'PATCH',{status:'DRAFT'});
       assert.equal((await admin.call('/admin/products/'+batchProduct.id,'DELETE')).status,409);
       await admin.call('/admin/products/'+product.id,'PATCH',{status:'DRAFT'});
       assert.equal((await admin.call('/admin/products/'+product.id,'DELETE')).status,409);
+    });
+    await t.test('product deletion cancels unpaid mixed orders, retains snapshots and blocks pending proofs', async()=>{
+      const p=(await post(admin,'/admin/products',{name:'Delete pending',status:'PUBLISHED',sellingType:'CONTINUOUS',variants:[{price:'1000',onHand:2}]})).product;
+      const purchase=await createOrder(alice,p.variants[0].id);assert.equal(purchase.status,201);
+      const deletionMethod=(await post(admin,'/admin/payment-methods',{name:'Deletion QRIS',type:'QRIS',qrImageKey:'https://example.test/qr.png'})).method;
+      const submitted=await alice.call(`/orders/${purchase.body.order.id}/proof`,'POST',image,{'content-type':'image/png','x-payment-method':deletionMethod.id});assert.equal(submitted.status,202);
+      assert.equal((await admin.call('/admin/products/'+p.id,'DELETE')).status,409);
+      assert.match((await admin.call('/admin/products/'+p.id)).body.product.deletionBlockedReason,/pending/i);
+      assert.equal((await admin.call('/admin/payment-submissions/'+submitted.body.submission.id+'/review','POST',{action:'REJECTED',reason:'Test proof rejected'})).status,200);
+      assert.equal((await admin.call('/admin/products/'+p.id,'DELETE')).status,204);
+      const retained=await db.order.findUniqueOrThrow({where:{id:purchase.body.order.id},include:{items:true,paymentSubmissions:true}});
+      assert.equal(retained.paymentStatus,'CANCELLED');assert.equal(retained.items[0].variantId,null);assert.equal(retained.items[0].unitPrice.toFixed(2),'1000.00');assert.match(retained.items[0].itemDescription,/Delete pending/);assert.equal(retained.paymentSubmissions[0].status,'REJECTED');
+      assert.equal((await alice.call('/orders/'+retained.id)).body.order.total,'1000.00');
+      const other=(await post(admin,'/admin/products',{name:'Retained mixed stock',sellingType:'CONTINUOUS',status:'PUBLISHED',variants:[{price:'1000',onHand:1}]})).product;
+      const batchP=(await post(admin,'/admin/products',{name:'Delete unpaid jacket',sellingType:'BATCH',status:'PUBLISHED',variants:[{size:'M',price:'2000'}]})).product;
+      const window=(await post(admin,'/admin/batches',{productId:batchP.id,name:'Deletion batch',status:'OPEN',opensAt:new Date(Date.now()-60000).toISOString(),closesAt:new Date(Date.now()+86400000).toISOString(),productionWeeks:2})).batch;
+      const mixed=await alice.call('/orders','POST',{items:[{variantId:other.variants[0].id,quantity:1},{variantId:batchP.variants[0].id,batchId:window.id,quantity:1,embroideryName:'Ada'}],customerName:'Student Buyer',customerPhone:'081234567890'},{'idempotency-key':randomUUID()});assert.equal(mixed.status,201);
+      assert.equal((await admin.call('/admin/batches/'+window.id,'PATCH',{status:'CLOSED'})).status,200);
+      assert.equal((await admin.call('/admin/batches/'+window.id+'/receive','POST',{items:[{variantId:batchP.variants[0].id,quantity:2}],reason:'Deletion test receipt'})).status,200);
+      assert.equal((await admin.call('/admin/products/'+batchP.id,'DELETE')).status,204);
+      const receipt=await db.inventoryMovement.findFirstOrThrow({where:{variantSku:batchP.variants[0].sku,type:'RECEIPT'}});assert.equal(receipt.batchId,null);assert.equal(receipt.variantId,null);assert.equal(receipt.onHandDelta,2);
+      const order=await db.order.findUniqueOrThrow({where:{id:mixed.body.order.id},include:{items:true}});assert.equal(order.paymentStatus,'CANCELLED');assert(order.items.every(i=>i.pickupStatus==='CANCELLED'));assert.equal(order.items.find(i=>i.embroideryName==='Ada').variantId,null);assert.equal(order.items.find(i=>i.embroideryName==='Ada').batchId,null);
+      assert.equal((await db.productVariant.findUniqueOrThrow({where:{id:other.variants[0].id}})).reserved,0);
+      const history=await db.inventoryMovement.findFirstOrThrow({where:{variantSku:p.variants[0].sku}});assert.equal(history.variantId,null);await assert.rejects(()=>db.inventoryMovement.update({where:{id:history.id},data:{reason:'tamper'}}));
     });
     await t.test('variant deletion protects history and the last variant',async()=>{
       const p=(await post(admin,'/admin/products',{name:'Variant deletion',sellingType:'CONTINUOUS',variants:[{size:'M',price:'1000'},{size:'L',price:'1000'}]})).product;
@@ -1225,7 +1254,7 @@ test(
       assert.equal((await admin.call('/admin/announcements/'+a.id,'DELETE')).status,204);
     });
     await t.test('non-personalized batch products, multiple open batches and reference-free approval',async()=>{
-      const p=(await post(admin,'/admin/products',{name:'Plain batch shirt',sellingType:'BATCH',embroideryRequired:false,status:'PUBLISHED',variants:[{size:'M',price:'12345.67'}]})).product;
+      const p=(await post(admin,'/admin/products',{name:'Plain batch shirt',sellingType:'BATCH',embroideryRequired:false,status:'PUBLISHED',variants:[{price:'12345.67'}]})).product;
       assert.equal(p.embroideryRequired,false);
       assert.equal((await admin.call("/admin/products/"+p.id,"PATCH",{name:"Plain batch shirt renamed"})).body.product.embroideryRequired,false);
       assert.equal((await admin.call('/admin/products','POST',{name:'Invalid batch stock',sellingType:'BATCH',variants:[{size:'M',price:'1000',onHand:1}]})).status,400);
@@ -1245,6 +1274,46 @@ test(
       assert.equal((await admin.call('/admin/batches/'+second.id,'PATCH',{status:'CLOSED'})).status,200);
       assert.equal((await admin.call('/admin/batches/'+second.id,'PATCH',{status:'IN_PRODUCTION'})).status,200);
       assert.equal((await createOrder(alice,p.variants[0].id,1,first.id)).status,201);
+    });
+    await t.test("admin uploads, public immutable media, product galleries and QRIS snapshots", async () => {
+      const binary = await sharp({ create: { width: 120, height: 100, channels: 3, background: "#00552e" } }).png().toBuffer();
+      const headers = { "content-type": "image/png", "x-image-purpose": "product" };
+      assert.equal((await alice.call("/admin/images", "POST", binary, headers)).status, 403);
+      assert.equal((await admin.call("/admin/images", "POST", Buffer.from("not a valid image file"), headers)).status, 400);
+      assert.equal((await admin.call("/admin/images", "POST", binary, { ...headers, "x-csrf-token": "wrong" })).status, 403);
+      assert.equal((await admin.call("/admin/images", "POST", Buffer.alloc(10 * 1024 * 1024 + 1), headers)).status, 413);
+      const first = await admin.call("/admin/images", "POST", binary, headers);
+      assert.equal(first.status, 201, JSON.stringify(first.body));
+      const second = await admin.call("/admin/images", "POST", binary, headers);
+      const urls = [first.body.image.url, second.body.image.url];
+      assert.match(urls[0], /^\/api\/media\/product-[0-9a-f-]+\.webp$/);
+      const media = await fetch(`http://localhost:${port}${urls[0]}`);
+      assert.equal(media.status, 200);assert.match(media.headers.get("content-type"), /image\/webp/);assert.match(media.headers.get("cache-control"), /immutable/);
+      assert.equal((await sharp(Buffer.from(await media.arrayBuffer())).metadata()).format, "webp");
+      assert.equal((await fetch(`http://localhost:${port}/api/media/not-an-upload.png`)).status, 404);
+      const p = (await post(admin, "/admin/products", { name: "Gallery fixture", sellingType: "CONTINUOUS", status: "PUBLISHED", imageKeys: urls, variants: [{ price: "12000", onHand: 1 }] })).product;
+      assert.deepEqual(p.imageKeys, urls);assert.equal(p.imageKey, urls[0]);
+      const edited = await admin.call("/admin/products/"+p.id, "PATCH", { imageKeys: urls.toReversed() });
+      assert.equal(edited.body.product.imageKey, urls[1]);assert.deepEqual(edited.body.product.imageKeys, urls.toReversed());
+      assert.deepEqual((await alice.call("/products/"+p.id)).body.product.imageKeys, urls.toReversed());
+      assert.equal((await admin.call("/admin/products/"+p.id,"PATCH",{imageKeys:Array(9).fill(urls[0])})).status,400);
+      assert.equal((await admin.call("/admin/products/"+p.id,"PATCH",{imageKeys:["/api/media/product-00000000-0000-0000-0000-000000000000.webp"]})).status,400);
+      const qr = await admin.call("/admin/images", "POST", binary, { ...headers, "x-image-purpose": "qris" });assert.equal(qr.status,201);
+      const qrUrl=qr.body.image.url;assert.match(qrUrl,/qris-.*\.png$/);
+      const method=(await post(admin,"/admin/payment-methods",{name:"Uploaded QRIS",type:"QRIS",qrImageKey:qrUrl})).method;
+      assert.equal(method.qrImageKey,qrUrl);
+      const purchase=await createOrder(alice,p.variants[0].id);assert.equal(purchase.status,201);
+      const sent=await alice.call(`/orders/${purchase.body.order.id}/proof`,"POST",binary,{"content-type":"image/png","x-payment-method":method.id});assert.equal(sent.status,202);
+      assert.equal((await admin.call("/admin/payment-methods/"+method.id,"PATCH",{enabled:false})).status,200);
+      const snapshot=await db.paymentSubmission.findUniqueOrThrow({where:{id:sent.body.submission.id}});assert.equal(snapshot.methodSnapshot.qrImageKey,qrUrl);
+      assert.equal((await fetch(`http://localhost:${port}${qrUrl}`)).status,200);
+
+      assert.equal((await admin.call("/admin/products/"+p.id,"PATCH",{imageKeys:[qrUrl]})).status,400);
+      assert.equal((await admin.call("/admin/payment-methods","POST",{name:"Wrong asset",type:"QRIS",qrImageKey:urls[0]})).status,400);
+      const cleared=await admin.call("/admin/products/"+p.id,"PATCH",{imageKeys:[]});assert.equal(cleared.body.product.imageKey,null);assert.deepEqual(cleared.body.product.imageKeys,[]);
+      // Removal from a gallery never removes a file another record or historical snapshot may reference.
+      assert.equal((await fetch(`http://localhost:${port}${urls[0]}`)).status,200);
+      const legacy=await admin.call("/admin/products/"+p.id,"PATCH",{imageKey:"https://example.test/legacy.jpg"});assert.deepEqual(legacy.body.product.imageKeys,["https://example.test/legacy.jpg"]);
     });
   },
 );

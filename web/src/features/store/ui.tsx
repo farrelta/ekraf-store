@@ -306,7 +306,6 @@ export function StoreLayout({
         <nav className="mobile-tabs" aria-label="Store navigation">
           {[
             ["/", "Shop", "box"],
-            ["/cart", "Cart", "cart"],
             ["/orders", "My Orders", "orders"],
             ["/account", "Account", "users"],
           ].map(([href, label, icon]) => (

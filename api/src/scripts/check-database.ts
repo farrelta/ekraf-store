@@ -21,11 +21,13 @@ try {
         SELECT 'order_product_mode', COUNT(*)::int FROM order_items i JOIN orders o ON o.id=i.order_id JOIN product_variants v ON v.id=i.variant_id JOIN products p ON p.id=v.product_id LEFT JOIN batches b ON b.id=i.batch_id
         WHERE (i.batch_id IS NULL AND p.selling_type <> 'CONTINUOUS') OR (i.batch_id IS NOT NULL AND (p.selling_type <> 'BATCH' OR b.product_id <> p.id))
         UNION ALL
-        SELECT 'embroidery_name', COUNT(*)::int FROM order_items i JOIN orders o ON o.id=i.order_id WHERE (i.embroidery_name IS NOT NULL AND length(trim(i.embroidery_name))=0) OR (i.batch_id IS NULL AND i.embroidery_name IS NOT NULL)
+        SELECT 'embroidery_name', COUNT(*)::int FROM order_items i JOIN orders o ON o.id=i.order_id WHERE (i.embroidery_name IS NOT NULL AND length(trim(i.embroidery_name))=0) OR (i.variant_id IS NOT NULL AND i.batch_id IS NULL AND i.embroidery_name IS NOT NULL)
         UNION ALL
         SELECT 'inventory_ledger', COUNT(*)::int FROM product_variants v LEFT JOIN (SELECT variant_id,SUM(on_hand_delta) AS physical,SUM(reserved_delta) AS held FROM inventory_movements GROUP BY variant_id) m ON m.variant_id=v.id WHERE v.on_hand <> COALESCE(m.physical,0) OR v.reserved <> COALESCE(m.held,0)
         UNION ALL
         SELECT 'verified_order', COUNT(*)::int FROM orders o JOIN (SELECT order_id,SUM(unit_price*quantity) AS total FROM order_items GROUP BY order_id) t ON t.order_id=o.id LEFT JOIN (SELECT order_id,SUM(amount) AS paid FROM payment_submissions WHERE status='VERIFIED' GROUP BY order_id) s ON s.order_id=o.id WHERE (o.payment_status='PAID' AND COALESCE(s.paid,0)<>t.total) OR (o.payment_status='PARTIALLY_PAID' AND (COALESCE(s.paid,0)<=0 OR s.paid>=t.total)) OR (o.payment_status IN ('PENDING','CANCELLED','EXPIRED') AND COALESCE(s.paid,0)<>0)
+        UNION ALL
+        SELECT 'product_images', COUNT(*)::int FROM products WHERE cardinality(image_keys)>8 OR image_key IS DISTINCT FROM image_keys[1] OR EXISTS (SELECT 1 FROM unnest(image_keys) value WHERE value IS NULL OR length(value)=0)
         UNION ALL
         SELECT 'roles', COUNT(*)::int FROM users WHERE role::text NOT IN ('ADMIN','CUSTOMER')
       `);

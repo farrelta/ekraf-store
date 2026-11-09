@@ -576,7 +576,7 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                             </p>
                             <div className="batch-metrics">
                               <div>
-                                <small>ORDERS</small>
+                                <small>CONFIRMED ORDERS</small>
                                 <strong>{b.stats.orders}</strong>
                               </div>
                               <div>
@@ -846,9 +846,9 @@ export function AdminPage({ section, id }: { section: string; id?: string }) {
                         headers={[
                           "Product",
                           "Batch",
-                          "Orders",
+                          "Confirmed orders",
                           "Product price from",
-                          "Order value",
+                          "Confirmed order value",
                           "Deadline",
                           "Status",
                           "Updated",

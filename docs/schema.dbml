@@ -82,6 +82,7 @@ Table products [headercolor: #175e7a] {
   name text [not null]
   description text
   image_key text
+  image_keys text[] [not null, note: 'Ordered gallery, up to 8 images; first image matches image_key for existing clients.']
   selling_type selling_types [not null]
   status product_status [not null, default: 'DRAFT']
   embroidery_required boolean [not null, default: true]
@@ -92,7 +93,7 @@ Table products [headercolor: #175e7a] {
     category
     (status, name)
   }
-  Note: 'One primary image. Category is a free-text label. Price and inventory belong only to variants. Create at least one variant per product before publication. Archive rather than delete referenced products. Do not change selling type after orders or batches exist.'
+  Note: 'Ordered image_keys gallery; image_key mirrors its first image. Category is a free-text label. Price and inventory belong only to variants. Create at least one variant per product before publication. Verified payments and pending proofs block product deletion; cancel unpaid orders and preserve detached historical snapshots. Do not change selling type after orders or batches exist.'
 }
 
 Table product_variants [headercolor: #175e7a] {
@@ -154,7 +155,7 @@ Table order_items [headercolor: #175e7a] {
   pickup_status pickup_status [not null, default: 'PENDING']
   id text [pk, not null]
   order_id text [not null]
-  variant_id text [not null]
+  variant_id text
   item_description text [not null]
   unit_price decimal(12,2) [not null]
   quantity integer [not null]
@@ -233,13 +234,13 @@ Ref order_customer {
   orders.user_id > users.id [delete: restrict, update: cascade]
 }
 Ref item_batch {
-  order_items.batch_id > batches.id [delete: restrict, update: cascade]
+  order_items.batch_id > batches.id [delete: set null, update: cascade]
 }
 Ref item_order {
   order_items.order_id > orders.id [delete: restrict, update: cascade]
 }
 Ref item_variant {
-  order_items.variant_id > product_variants.id [delete: restrict, update: cascade]
+  order_items.variant_id > product_variants.id [delete: set null, update: cascade]
 }
 Ref submission_order {
   payment_submissions.order_id > orders.id [delete: restrict, update: cascade]
@@ -257,7 +258,7 @@ Ref movement_order {
   inventory_movements.order_id > orders.id [delete: restrict, update: cascade]
 }
 Ref movement_batch {
-  inventory_movements.batch_id > batches.id [delete: restrict, update: cascade]
+  inventory_movements.batch_id > batches.id [delete: set null, update: cascade]
 }
 Ref movement_actor {
   inventory_movements.actor_id > users.id [delete: restrict, update: cascade]
