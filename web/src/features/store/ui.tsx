@@ -6,6 +6,7 @@ import { useStore } from "./store-provider";
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, ReactNode> = {
     instagram: <><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r=".8" fill="currentColor" stroke="none"/></>,
+    youtube: <path fill="currentColor" stroke="none" fillRule="evenodd" d="M5 4h14a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H5a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Zm5 4v8l6-4-6-4Z"/>,
     email: <><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/></>,
     search: (
       <>
@@ -153,12 +154,19 @@ export function State({
 export function Pager({
   value,
   onPage,
+  pageHref,
 }: {
   value?: { page: number; pageSize: number; total: number; pageCount: number };
   onPage: (page: number) => void;
+  pageHref?: (page: number) => string;
 }) {
   if (!value) return null;
   const { page, pageSize, total, pageCount } = value;
+  function pageControl(target: number, label: string, glyph: string, disabled: boolean) {
+    return pageHref && !disabled
+      ? <Link href={pageHref(target)} aria-label={label} scroll={false}>{glyph}</Link>
+      : <button aria-label={label} disabled={disabled} onClick={() => onPage(target)}>{glyph}</button>;
+  }
   return (
     <div className="pagination">
       <span>
@@ -167,23 +175,11 @@ export function Pager({
           : "0 results"}
       </span>
       <div>
-        <button
-          aria-label="Previous page"
-          disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
-        >
-          ‹
-        </button>
+        {pageControl(page - 1, "Previous page", "‹", page <= 1)}
         <span>
           {page} / {Math.max(1, pageCount)}
         </span>
-        <button
-          aria-label="Next page"
-          disabled={page >= pageCount}
-          onClick={() => onPage(page + 1)}
-        >
-          ›
-        </button>
+        {pageControl(page + 1, "Next page", "›", page >= pageCount)}
       </div>
     </div>
   );
@@ -229,7 +225,11 @@ export function StoreLayout({
             )}
           </div>
           <Link className="wordmark" href="/">
-            EKRAF<span>BEM KM MIPA UGM</span>
+            EKRAF
+            <span className="store-brand-affiliation">
+              <img src="/bem-logo.png" width={24} height={24} alt="" />
+              <small>BEM KM MIPA UGM</small>
+            </span>
           </Link>
           <nav className="desktop-nav">
             <Link className={pathname === "/" ? "active" : ""} href="/">

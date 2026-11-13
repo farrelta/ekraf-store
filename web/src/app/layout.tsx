@@ -3,7 +3,11 @@ import type { ReactNode } from "react";
 import "../style.css";
 import { StoreProvider } from "@/features/store/store-provider";
 
+import { siteOrigin } from "@/features/store/seo";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteOrigin),
+  icons: { icon: { url: "/bem-logo.png", type: "image/png", sizes: "192x192" } },
   title: "EKRAF | BEM KM MIPA UGM",
   description: "Merchandise and faculty batch pieces from EKRAF BEM KM MIPA UGM.",
 };

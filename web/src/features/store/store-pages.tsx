@@ -3,20 +3,22 @@ import { FormFeedback, FieldError } from "./form-feedback";
 import { openBatches, isBatchOpen } from "./batch-window";
 import Link from "next/link";
 import Image from "next/image";
+import { HeroSpotlight } from "./hero-spotlight";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useData, useStore } from "./store-provider";
 import { StoreLayout, State, Pager, Badge, Icon, CustomerSupport, PasswordInput } from "./ui";
 import {
+  type Batch,
   type Product,
   type Order,
   type PaymentMethod,
   money,
   date,
 } from "./types";
-import { jacketPhoto, keychainPhoto } from "./design-assets";
 import { AnnouncementBanner } from "./announcements";
 import { OrderCard } from "./order-card";
+import type { CatalogPage } from "./public-catalog";
 import { ProductImage, ProductGallery } from "./product-images";
 
 const price = (p: Product) =>
@@ -26,10 +28,7 @@ const price = (p: Product) =>
 function ProductTile({ product: p }: { product: Product }) {
   const batch = openBatches(p.batches)[0],
     available = p.variants.reduce((n, v) => n + v.onHand - v.reserved, 0);
-  const href =
-    p.sellingType === "BATCH" && batch
-      ? `/batch-orders/${batch.id}`
-      : `/products/${p.id}`;
+  const href = `/products/${p.id}`;
   return (
     <article className="product-tile">
       <Link className="tile-image" href={href}><ProductImage product={p}/></Link>
@@ -67,11 +66,11 @@ function ProductTile({ product: p }: { product: Product }) {
     </article>
   );
 }
-export function ShopPage() {
+export function ShopPage({ initialCatalog = null }: { initialCatalog?: CatalogPage | null } = {}) {
   const search = useSearchParams(),
     router = useRouter(),
     pathname = usePathname();
-  const { data, error, loading, reload } = useData("/api/products?" + search.toString());
+  const { data, error, loading, reload } = useData<CatalogPage>("/api/products?" + search.toString(), initialCatalog);
   const {data: batchData} = useData("/api/batches?pageSize=1");
   const batch=batchData?.batches[0];
   function change(key: string, value: string) {
@@ -87,34 +86,37 @@ export function ShopPage() {
         <AnnouncementBanner />
         <section className="flow-hero">
           <div className="hero-copy">
-
+            <small>EKRAF / BEM KM MIPA UGM</small>
             <h1>
               Made for
               <br />
               campus life.
             </h1>
             <p>
-              Everyday merch and limited batch pieces, made by MIPA students
-              for MIPA students.
+              Student-made merchandise and batch orders from BEM KM MIPA UGM.
             </p>
             <div className="button-row">
               <a className="button-light" href="#collection">
-                Shop Now
+                Shop collection
               </a>
               <Link className="button-outline-light" href="/about">
                 About EKRAF →
               </Link>
             </div>
           </div>
-          <div className="hero-photos">
-            <figure className="hero-tee">
-              <Image src={keychainPhoto} width={1836} height={2304} sizes="(max-width: 767px) 31vw, (max-width: 1280px) 16vw, 210px" loading="eager" alt="MIPA department mascot keychains" />
-              <figcaption>MIPA keychains</figcaption>
-            </figure>
-            <figure className="hero-jacket">
-              <Image src={jacketPhoto} width={817} height={876} sizes="(max-width: 767px) 41vw, (max-width: 1280px) 22vw, 280px" loading="eager" fetchPriority="high" alt="FMIPA UGM faculty jacket, front and back" />
-              <figcaption>Faculty collection</figcaption>
-            </figure>
+          <div className="hero-portrait">
+            <div className="hero-stage">
+              <HeroSpotlight />
+              <Image
+                src="/illustrations/hero-campus-portrait.png"
+                width={496}
+                height={503}
+                sizes="(max-width: 767px) 61vw, 390px"
+                loading="eager"
+                fetchPriority="high"
+                alt="Two students wearing FMIPA UGM faculty jackets"
+              />
+            </div>
             {batch && (
               <Link
                 className="hero-batch"
@@ -180,7 +182,7 @@ export function ShopPage() {
                 <option value="price_desc">Price: high to low</option>
                 <option value="newest">Newest</option>
               </select>
-              {data?.categories.length > 0 && (
+              {!!data?.categories.length && (
                 <select
                   aria-label="Filter category"
                   value={search.get("category") || ""}
@@ -225,6 +227,12 @@ export function ShopPage() {
             <Pager
               value={data?.pagination}
               onPage={(page) => change("page", String(page))}
+              pageHref={(page) => {
+                const next = new URLSearchParams(search.toString());
+                if (page > 1) next.set("page", String(page));
+                else next.delete("page");
+                return next.size ? "/?" + next.toString() : "/";
+              }}
             />
           </State>
         </section>
@@ -259,17 +267,20 @@ export function ShopPage() {
 export function ProductPage({
   id,
   batchMode = false,
+  initialProduct,
 }: {
   id: string;
   batchMode?: boolean;
+  initialProduct?: Product;
 }) {
-  const { data, loading, error, reload } = useData(
+  const { data, loading, error, reload } = useData<{ product?: Product; batch?: Batch & { product: Product } }>(
     batchMode ? `/api/batches/${id}` : `/api/products/${id}`,
+    initialProduct ? { product: initialProduct } : null,
   );
   const { add } = useStore();
   const router = useRouter();
   const p: Product | undefined = batchMode
-    ? data?.batch.product
+    ? data?.batch?.product
     : data?.product;
   const batch = batchMode ? data?.batch : openBatches(p?.batches || [])[0];
   const [selectedOptions, setSelectedOptions] = useState<Partial<Record<"color" | "type" | "size", string>>>({}),
@@ -295,7 +306,7 @@ export function ProductPage({
     }
     add({
       variantId: v.id,
-      batchId: isBatch ? batch.id : null,
+      batchId: isBatch ? batch?.id ?? null : null,
       quantity,
       ...(isBatch && p?.embroideryRequired !== false ? { embroideryName: name.trim() } : {}),
     });
@@ -1007,6 +1018,10 @@ export function AboutPage() {
               >
                 <span><Icon name="instagram" size={22}/><span className="sr-only">Instagram</span></span>
                 <strong>@ekrafmipaugm</strong>
+              </a>
+              <a href="https://www.youtube.com/@EkrafMIPAUGM" target="_blank" rel="noreferrer">
+                <span><Icon name="youtube" size={22}/><span className="sr-only">YouTube</span></span>
+                <strong>@EkrafMIPAUGM</strong>
               </a>
               <a href="mailto:eknonomikreatifbemmipa@gmail.com">
                 <span><Icon name="email" size={22}/><span className="sr-only">Email</span></span>

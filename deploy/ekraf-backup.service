@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up EKRAF PostgreSQL and local uploads to private object storage
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/ekraf/.env.backup
+ExecStart=/bin/bash /opt/ekraf/backup-store.sh
+TimeoutStartSec=30min
+UMask=0077

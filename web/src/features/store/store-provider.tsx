@@ -186,12 +186,13 @@ export function useStore() {
   if (!value) throw new Error("StoreProvider is required");
   return value;
 }
-export function useData<T = any>(url: string | null) {
+export function useData<T = any>(url: string | null, initialData: T | null = null) {
   const { api } = useStore();
-  const [data, setData] = useState<T | null>(null),
+  const [data, setData] = useState<T | null>(initialData),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(initialData === null),
     [version, setVersion] = useState(0);
+  const hasInitialData = initialData !== null;
   const reload = useCallback(async () => {
     setVersion((v) => v + 1);
   }, []);
@@ -202,7 +203,7 @@ export function useData<T = any>(url: string | null) {
     }
     let active = true;
     const controller = new AbortController();
-    setLoading(true);
+    if (!hasInitialData) setLoading(true);
     setError("");
     void api(url, { signal: controller.signal })
       .then((value) => {
@@ -221,6 +222,6 @@ export function useData<T = any>(url: string | null) {
       active = false;
       controller.abort();
     };
-  }, [url, api, version]);
+  }, [url, api, version, hasInitialData]);
   return { data, error, loading, reload };
 }

@@ -1,3 +1,4 @@
+export { privateMetadata as metadata } from "@/features/store/seo";
 import { Suspense } from "react";
 import { ProductPage } from "@/features/store/store-pages";
 export default async function Page({

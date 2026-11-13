@@ -1,3 +1,4 @@
+export { privateMetadata as metadata } from "@/features/store/seo";
 import { Suspense } from "react";
 import { OrdersPage } from "@/features/store/store-pages";
 export default function Page() {
